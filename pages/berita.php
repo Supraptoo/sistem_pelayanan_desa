@@ -73,6 +73,23 @@ try {
 } catch (Exception $e) {
     die("Terjadi kesalahan: " . $e->getMessage());
 }
+
+// Fungsi untuk mendapatkan path gambar yang benar
+function getImagePath($gambar) {
+    // Jika gambar kosong, gunakan gambar default
+    if (empty($gambar)) {
+        return '../assets/images/landingpage/bgutama.jpg';
+    }
+    
+    // Cek apakah gambar ada di folder uploads
+    $uploadPath = '../uploads/berita/' . $gambar;
+    if (file_exists($uploadPath)) {
+        return $uploadPath;
+    }
+    
+    // Jika tidak ditemukan, gunakan gambar default
+    return '../assets/images/landingpage/bgutama.jpg';
+}
 ?>
 
 <!DOCTYPE html>
@@ -181,7 +198,7 @@ try {
         /* Hero Section */
         .hero-section {
             background: linear-gradient(rgba(220, 38, 38, 0.85), rgba(185, 28, 28, 0.85)),
-                url('assets/images/landingpage/bgutama.jpg') center/cover no-repeat;
+                url('../assets/images/landingpage/bgutama.jpg') center/cover no-repeat;
             color: var(--pure-white);
             padding: 120px 0 80px;
             position: relative;
@@ -382,7 +399,7 @@ try {
             left: 0;
             width: 100%;
             height: 100%;
-            background: url('assets/images/pattern.png') center/cover;
+            background: url('../assets/images/pattern.png') center/cover;
             opacity: 0.05;
             z-index: 1;
         }
@@ -637,7 +654,7 @@ try {
                             <?php foreach ($berita as $item): ?>
                                 <div class="col-md-6 col-lg-4" data-aos="fade-up">
                                     <div class="news-card card h-100 border-0 shadow-sm">
-                                        <img src="<?php echo !empty($item['gambar']) ? './uploads/berita/' . htmlspecialchars($item['gambar']) : './assets/images/landingpage/bgutama.jpg'; ?>" class="card-img-top" alt="<?php echo htmlspecialchars($item['judul']); ?>">
+                                        <img src="<?php echo getImagePath($item['gambar_path']); ?>" class="card-img-top" alt="<?php echo htmlspecialchars($item['judul']); ?>">
                                         <div class="card-body">
                                             <span class="news-date d-block mb-2">
                                                 <i class="far fa-calendar-alt me-2"></i>
@@ -685,7 +702,7 @@ try {
                         <?php endif; ?>
                     <?php else: ?>
                         <div class="text-center py-5" data-aos="fade-up">
-                            <img src="./assets/images/landingpage/bgutama.jpeg" alt="No data" class="img-fluid mb-4" style="max-width: 300px;">
+                            <img src="../assets/images/landingpage/bgutama.jpg" alt="No data" class="img-fluid mb-4" style="max-width: 300px;">
                             <h4 class="mb-3">Berita tidak ditemukan</h4>
                             <p class="text-muted mb-4">Tidak ada berita yang sesuai dengan pencarian Anda</p>
                             <a href="berita.php" class="btn btn-primary-custom px-4">Lihat Semua Berita</a>
@@ -702,7 +719,7 @@ try {
             <div class="row g-4">
                 <div class="col-lg-3">
                     <div class="mb-4">
-                        <img src="./assets/images/logo.png" alt="Logo <?php echo $desa_nama; ?>" class="footer-logo">
+                        <img src="../assets/images/logo.png" alt="Logo <?php echo $desa_nama; ?>" class="footer-logo">
                     </div>
                     <p class="mb-4"><?php echo $desa_motto; ?></p>
                     <div class="social-icons">
@@ -716,10 +733,10 @@ try {
                     <div class="footer-links">
                         <h5>Menu</h5>
                         <ul>
-                            <li><a href="index.php">Beranda</a></li>
-                            <li><a href="index.php#sejarah">Sejarah</a></li>
-                            <li><a href="index.php#demografi">Demografi</a></li>
-                            <li><a href="index.php#umkm">UMKM</a></li>
+                            <li><a href="../landingpage.php">Beranda</a></li>
+                            <li><a href="../landingpage.php#sejarah">Sejarah</a></li>
+                            <li><a href="../landingpage.php#demografi">Demografi</a></li>
+                            <li><a href="../landingpage.php#umkm">UMKM</a></li>
                             <li><a href="galeri.php">Galeri</a></li>
                             <li><a href="berita.php">Berita</a></li>
                         </ul>

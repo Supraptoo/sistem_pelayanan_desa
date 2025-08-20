@@ -3,65 +3,62 @@ session_start();
 
 // Pastikan path ke config/database.php benar
 require_once __DIR__ . '/../../config/database.php';
+
 // Data desa
 $desa_nama = "Desa Winduaji";
+$desa_lokasi = "Kecamatan Sejahtera, Kabupaten Makmur, Provinsi Bahagia";
+$desa_motto = "Bersama Membangun Desa yang Mandiri dan Berbudaya";
 
-// Ambil data kategori UMKM
-try {
-    $pdo = get_db_connection();
-    $stmt = $pdo->query("SELECT * FROM kategori_umkm ORDER BY nama_kategori ASC");
-    $kategori_umkm = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    error_log('Database query error: ' . $e->getMessage());
-    $kategori_umkm = [];
-}
-// Cek apakah ada aksi tambah kategori
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nama_kategori'])) {
-    $nama_kategori = trim($_POST['nama_kategori']);
-    $deskripsi = trim($_POST['deskripsi'] ?? '');
+// Proses form tambah UMKM
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Ambil data dari form
+    $nama = $_POST['nama'] ?? '';
+    $pemilik = $_POST['pemilik'] ?? '';
+    $alamat = $_POST['alamat'] ?? '';
+    $telepon = $_POST['telepon'] ?? '';
+    $deskripsi = $_POST['deskripsi'] ?? '';
+    $status = $_POST['status'] ?? 'Aktif';
     
-    if (!empty($nama_kategori)) {
-        try {
-            $stmt = $pdo->prepare("INSERT INTO kategori_umkm (nama_kategori, deskripsi) VALUES (:nama_kategori, :deskripsi)");
-            $stmt->execute([':nama_kategori' => $nama_kategori, ':deskripsi' => $deskripsi]);
-            header('Location: kategori-umkm.php');
-            exit;
-        } catch (PDOException $e) {
-            error_log('Database insert error: ' . $e->getMessage());
+    // Proses upload gambar
+    $gambar = '';
+    if (isset($_FILES['gambar'])) {
+        $file = $_FILES['gambar'];
+        $filename = $file['name'];
+        $filetmp = $file['tmp_name'];
+        $filesize = $file['size'];
+        $fileerror = $file['error'];
+        
+        // Cek apakah ada file yang diupload
+        if ($fileerror === 0) {
+            // Generate nama file unik
+            $fileext = pathinfo($filename, PATHINFO_EXTENSION);
+            $fileext = strtolower($fileext);
+            $allowed = ['jpg', 'jpeg', 'png', 'gif'];
+            
+            if (in_array($fileext, $allowed)) {
+                $newfilename = uniqid('umkm_', true) . '.' . $fileext;
+                $filedestination = '../../assets/images/umkm/' . $newfilename;
+                
+                if (move_uploaded_file($filetmp, $filedestination)) {
+                    $gambar = $newfilename;
+                }
+            }
         }
     }
-}
-// Cek apakah ada aksi edit kategori
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
-    $id = (int)$_POST['id'];
-    $nama_kategori = trim($_POST['nama_kategori']);
-    $deskripsi = trim($_POST['deskripsi'] ?? '');
     
-    if (!empty($nama_kategori)) {
-        try {
-            $stmt = $pdo->prepare("UPDATE kategori_umkm SET nama_kategori = :nama_kategori, deskripsi = :deskripsi WHERE id = :id");
-            $stmt->execute([':nama_kategori' => $nama_kategori, ':deskripsi' => $deskripsi, ':id' => $id]);
-            header('Location: kategori-umkm.php');
-            exit;
-        } catch (PDOException $e) {
-            error_log('Database update error: ' . $e->getMessage());
-        }
-    }
-}
-// Cek apakah ada aksi hapus kategori
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
-    $id = (int)$_POST['hapus_id'];
+    // Simpan data ke database (contoh, sesuaikan dengan database Anda)
+    // $query = "INSERT INTO umkm (nama, pemilik, alamat, telepon, deskripsi, gambar, status, tanggal_daftar) 
+    //           VALUES (?, ?, ?, ?, ?, ?, ?, NOW())";
+    // $stmt = $pdo->prepare($query);
+    // $stmt->execute([$nama, $pemilik, $alamat, $telepon, $deskripsi, $gambar, $status]);
     
-    try {
-        $stmt = $pdo->prepare("DELETE FROM kategori_umkm WHERE id = :id");
-        $stmt->execute([':id' => $id]);
-        header('Location: kategori-umkm.php');
-        exit;
-    } catch (PDOException $e) {
-        error_log('Database delete error: ' . $e->getMessage());
-    }
+    // Setelah berhasil disimpan, redirect ke halaman UMKM
+    // header('Location: umkm.php');
+    // exit;
+    
+    // Untuk contoh, kita tampilkan pesan sukses
+    $success_message = "UMKM berhasil ditambahkan!";
 }
-
 ?>
 
 <!DOCTYPE html>
@@ -70,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kategori UMKM - <?php echo $desa_nama; ?></title>
+    <title>Tambah UMKM - <?php echo $desa_nama; ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -369,203 +366,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
             margin: 0;
         }
 
-        /* Table Styles */
-        .table-responsive {
-            border-radius: var(--border-radius);
-            overflow: hidden;
-            box-shadow: var(--shadow-sm);
-            background: white;
-        }
-
-        .table {
-            margin-bottom: 0;
-        }
-
-        .table thead th {
-            background: var(--primary-color);
-            color: white;
-            border-bottom: none;
-            font-weight: 600;
-            padding: 1rem;
-        }
-
-        .table tbody td {
-            padding: 0.75rem 1rem;
-            vertical-align: middle;
-        }
-
-        .table tbody tr:hover {
-            background-color: var(--primary-light);
-        }
-
-        .badge {
-            padding: 0.5em 0.75em;
-            font-weight: 600;
-            border-radius: 4px;
-            font-size: 0.75rem;
-        }
-
-        /* Status Badges */
-        .badge-published {
-            background-color: rgba(76, 201, 240, 0.1);
-            color: var(--success-color);
-        }
-        
-        .badge-draft {
-            background-color: rgba(248, 150, 30, 0.1);
-            color: var(--warning-color);
-        }
-        
-        .badge-pending {
-            background-color: rgba(67, 97, 238, 0.1);
-            color: var(--primary-color);
-        }
-
         /* Form Styles */
         .form-card {
             background: white;
             border-radius: var(--border-radius);
-            box-shadow: var(--shadow-sm);
             padding: 2rem;
-            margin-bottom: 2rem;
-        }
-
-        /* Dashboard Cards */
-        .dashboard-card {
-            border-radius: var(--border-radius);
-            border: none;
             box-shadow: var(--shadow-sm);
-            transition: var(--transition);
             margin-bottom: 1.5rem;
-            background: white;
-            border-left: 4px solid var(--primary-color);
-            overflow: hidden;
         }
 
-        .dashboard-card:hover {
-            transform: translateY(-5px);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .card-icon {
-            font-size: 2rem;
-            color: var(--primary-color);
-            margin-bottom: 1rem;
-        }
-
-        .card-title {
-            font-size: 0.9rem;
-            color: var(--gray-medium);
+        .form-label {
+            font-weight: 600;
             margin-bottom: 0.5rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 600;
         }
 
-        .card-value {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: var(--dark-color);
-            margin-bottom: 1rem;
-        }
-
-        .card-link {
-            color: var(--primary-color);
-            text-decoration: none;
-            font-weight: 600;
-            display: inline-flex;
-            align-items: center;
-            font-size: 0.9rem;
-            transition: var(--transition);
-        }
-
-        .card-link:hover {
-            color: var(--secondary-color);
-        }
-
-        .card-link i {
-            margin-left: 5px;
-            transition: transform 0.3s;
-        }
-
-        .card-link:hover i {
-            transform: translateX(3px);
-        }
-
-        /* Card Colors */
-        .card-news {
-            border-left-color: var(--success-color);
-        }
-        .card-news .card-icon {
-            color: var(--success-color);
-        }
-        
-        .card-umkm {
-            border-left-color: var(--warning-color);
-        }
-        .card-umkm .card-icon {
-            color: var(--warning-color);
-        }
-        
-        .card-gallery {
-            border-left-color: var(--accent-color);
-        }
-        .card-gallery .card-icon {
-            color: var(--accent-color);
-        }
-        
-        .card-complaint {
-            border-left-color: var(--danger-color);
-        }
-        .card-complaint .card-icon {
-            color: var(--danger-color);
-        }
-        
-        .card-resident {
-            border-left-color: #7209b7;
-        }
-        .card-resident .card-icon {
-            color: #7209b7;
-        }
-
-        /* Quick Action Buttons */
-        .quick-actions {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-            gap: 1rem;
-        }
-
-        .quick-action-btn {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 1.25rem 0.5rem;
+        .form-control, .form-select {
             border-radius: var(--border-radius);
-            background: white;
-            color: var(--dark-color);
-            text-decoration: none;
-            transition: var(--transition);
-            box-shadow: var(--shadow-sm);
-            text-align: center;
-            border: none;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--gray-light);
         }
-        
-        .quick-action-btn:hover {
-            transform: translateY(-3px);
-            box-shadow: var(--shadow-md);
-            color: var(--primary-color);
+
+        .form-control:focus, .form-select:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.25rem rgba(67, 97, 238, 0.25);
         }
-        
-        .quick-action-btn i {
-            font-size: 1.5rem;
-            margin-bottom: 0.75rem;
-            color: var(--primary-color);
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+            padding: 0.75rem 1.5rem;
+            font-weight: 600;
+            border-radius: var(--border-radius);
         }
-        
-        .quick-action-btn span {
-            font-size: 0.85rem;
-            font-weight: 500;
+
+        .btn-primary:hover {
+            background-color: var(--secondary-color);
+            border-color: var(--secondary-color);
+        }
+
+        .preview-image {
+            max-width: 200px;
+            max-height: 200px;
+            border-radius: var(--border-radius);
+            border: 1px solid var(--gray-light);
+            margin-top: 1rem;
+            display: none;
         }
 
         /* Responsive Adjustments */
@@ -597,18 +442,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
         }
 
         @media (max-width: 768px) {
-            .quick-actions {
-                grid-template-columns: repeat(2, 1fr);
+            .content-section {
+                padding: 1.5rem;
             }
         }
 
         @media (max-width: 576px) {
             .content-section {
-                padding: 1.5rem 1rem;
+                padding: 1rem;
             }
             
-            .quick-actions {
-                grid-template-columns: 1fr;
+            .section-header {
+                flex-direction: column;
+                align-items: flex-start;
             }
         }
 
@@ -630,21 +476,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
         ::-webkit-scrollbar-thumb:hover {
             background: var(--secondary-color);
         }
-
-        /* Animation for sidebar toggle */
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        .sidebar-menu-container::-webkit-scrollbar {
-            width: 4px;
-        }
     </style>
 </head>
 
 <body>
-      <!-- Sidebar -->
+    <!-- Sidebar -->
     <div class="sidebar">
         <div class="sidebar-header">
             <a href="dashboard.php" class="sidebar-brand">
@@ -655,7 +491,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
         <div class="sidebar-menu-container">
             <ul class="sidebar-menu">
                 <li>
-                    <a href="../admin/dashboard.php" class="active">
+                    <a href="../admin/dashboard.php">
                         <i class="fas fa-tachometer-alt"></i>
                         <span class="menu-text">Dashboard</span>
                     </a>
@@ -668,9 +504,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
                     <ul class="submenu">
-                        <li><a href="../data_warga/penduduk.php">Data Penduduk</a></li>
-                        <li><a href="../data_warga/keluarga.php">Data Keluarga</a></li>
-                        <li><a href="../data_warga/rt-rw.php">Data RT/RW</a></li>
+                        <li><a href="../admin/data_warga/keluarga.php">Data Keluarga</a></li>
+                        <li><a href="../admin/data_warga/rt-rw.php">Data RT/RW</a></li>
+                        <li><a href="../admin/data_warga/penduduk.php">Data Penduduk</a></li>
                     </ul>
                 </li>
                 <li>
@@ -680,19 +516,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
                     <ul class="submenu">
-                        <li><a href="../berita/berita.php">Kelola Berita</a></li>
-                        <li><a href="../berita/kategori_berita.php">Kategori</a></li>
+                        <li><a href="../admin/berita/berita.php">Kelola Berita</a></li>
+                        <li><a href="../admin/berita/kategori_berita.php">Kategori</a></li>
                     </ul>
                 </li>
                 <li>
-                    <a href="javascript:void(0);" class="has-submenu">
+                    <a href="javascript:void(0);" class="has-submenu active">
                         <i class="fas fa-store"></i>
                         <span class="menu-text">UMKM</span>
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
-                    <ul class="submenu">
-                        <li><a href="../umkm/umkm.php">Daftar UMKM</a></li>
-                        <li><a href="../umkm/kategori-umkm.php">Kategori</a></li>
+                    <ul class="submenu show">
+                        <li><a href="../admin/umkm/umkm.php">Daftar UMKM</a></li>
+                        <li><a href="../admin/umkm/kategori-umkm.php">Kategori</a></li>
                     </ul>
                 </li>
                 <li>
@@ -702,13 +538,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
                     <ul class="submenu">
-                        <li><a href="../galeri/foto.php">Foto</a></li>
-                        
+                        <li><a href="../admin/galeri/foto.php">Foto</a></li>
                     </ul>
                 </li>
              
                 <li>
-                    <a href="../../logout.php">
+                    <a href="../logout.php">
                         <i class="fas fa-sign-out-alt"></i>
                         <span class="menu-text">Keluar</span>
                     </a>
@@ -725,7 +560,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
                 <button class="toggle-btn me-3">
                     <i class="fas fa-bars"></i>
                 </button>
-                <span class="d-none d-md-inline">Kategori UMKM</span>
+                <span class="d-none d-md-inline">Tambah UMKM</span>
             </div>
             <div class="user-menu">
                 <div class="dropdown">
@@ -741,161 +576,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
         <!-- Content Section -->
         <div class="content-section">
             <div class="section-header">
-                <h1 class="section-title">Kategori UMKM</h1>
+                <h1 class="section-title">Tambah UMKM Baru</h1>
                 <div>
-                    <span class="text-muted"><?php echo date('d F Y, H:i'); ?></span>
+                    <a href="umkm.php" class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left me-2"></i> Kembali
+                    </a>
                 </div>
             </div>
 
-            <!-- Quick Actions -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="quick-actions">
-                        <a href="umkm.php" class="quick-action-btn">
-                            <i class="fas fa-store"></i>
-                            <span>Daftar UMKM</span>
-                        </a>
-                        <a href="tambah-umkm.php" class="quick-action-btn">
-                            <i class="fas fa-plus-circle"></i>
-                            <span>Tambah UMKM</span>
-                        </a>
-                        <a href="kategori-umkm.php" class="quick-action-btn">
-                            <i class="fas fa-tags"></i>
-                            <span>Kategori UMKM</span>
-                        </a>
-                        <a href="statistik-umkm.php" class="quick-action-btn">
-                            <i class="fas fa-chart-pie"></i>
-                            <span>Statistik UMKM</span>
-                        </a>
-                    </div>
+            <?php if (isset($success_message)): ?>
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <?php echo $success_message; ?>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                 </div>
-            </div>
+            <?php endif; ?>
 
-            <!-- Tambah Kategori Form -->
-            <div class="form-card mb-4">
-                <h5 class="mb-4">Tambah Kategori Baru</h5>
-                <form id="formTambahKategori" method="POST" action="">
-                    <div class="row">
+            <div class="form-card">
+                <form action="tambah_umkm.php" method="POST" enctype="multipart/form-data">
+                    <div class="row mb-4">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="nama_kategori" class="form-label">Nama Kategori</label>
-                                <input type="text" class="form-control" id="nama_kategori" name="nama_kategori" required>
+                                <label for="nama" class="form-label">Nama UMKM</label>
+                                <input type="text" class="form-control" id="nama" name="nama" required>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="pemilik" class="form-label">Nama Pemilik</label>
+                                <input type="text" class="form-control" id="pemilik" name="pemilik" required>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="alamat" class="form-label">Alamat</label>
+                                <input type="text" class="form-control" id="alamat" name="alamat" required>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="telepon" class="form-label">Nomor Telepon</label>
+                                <input type="tel" class="form-control" id="telepon" name="telepon" required>
                             </div>
                         </div>
+                        
                         <div class="col-md-6">
                             <div class="mb-3">
-                                <label for="deskripsi" class="form-label">Deskripsi</label>
-                                <input type="text" class="form-control" id="deskripsi" name="deskripsi">
+                                <label for="gambar" class="form-label">Gambar UMKM</label>
+                                <input type="file" class="form-control" id="gambar" name="gambar" accept="image/*" onchange="previewImage(this)">
+                                <small class="text-muted">Format: JPG, PNG, GIF. Maksimal 2MB.</small>
+                                <img id="imagePreview" class="preview-image" alt="Preview Gambar">
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="status" class="form-label">Status</label>
+                                <select class="form-select" id="status" name="status" required>
+                                    <option value="Aktif" selected>Aktif</option>
+                                    <option value="Nonaktif">Nonaktif</option>
+                                </select>
                             </div>
                         </div>
                     </div>
-                    <button type="submit" class="btn btn-primary">Simpan Kategori</button>
-                </form>
-            </div>
-
-            <!-- Daftar Kategori UMKM -->
-            <div class="card">
-                <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Daftar Kategori UMKM</h5>
-                    <div class="d-flex">
-                        <input type="text" class="form-control form-control-sm me-2" placeholder="Cari kategori..." id="searchInput">
-                        <button class="btn btn-sm btn-outline-primary" id="refreshBtn">
-                            <i class="fas fa-sync-alt"></i>
+                    
+                    <div class="mb-3">
+                        <label for="deskripsi" class="form-label">Deskripsi UMKM</label>
+                        <textarea class="form-control" id="deskripsi" name="deskripsi" rows="5" required></textarea>
+                    </div>
+                    
+                    <div class="d-flex justify-content-end mt-4">
+                        <button type="reset" class="btn btn-outline-secondary me-3">
+                            <i class="fas fa-undo me-2"></i> Reset
                         </button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>No</th>
-                                    <th>Nama Kategori</th>
-                                    <th>Deskripsi</th>
-                                    <th>Jumlah UMKM</th>
-                                    <th>Aksi</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if (empty($kategori_umkm)): ?>
-                                    <tr>
-                                        <td colspan="5" class="text-center">Belum ada data kategori UMKM</td>
-                                    </tr>
-                                <?php else: ?>
-                                    <?php foreach ($kategori_umkm as $index => $kategori): ?>
-                                        <tr>
-                                            <td><?php echo $index + 1; ?></td>
-                                            <td><?php echo htmlspecialchars($kategori['nama_kategori']); ?></td>
-                                            <td><?php echo htmlspecialchars($kategori['deskripsi'] ?? '-'); ?></td>
-                                            <td>0</td> <!-- Ganti dengan query count UMKM per kategori -->
-                                            <td>
-                                                <button class="btn btn-sm btn-outline-primary edit-kategori" 
-                                                        data-id="<?php echo $kategori['id']; ?>"
-                                                        data-nama="<?php echo htmlspecialchars($kategori['nama_kategori']); ?>"
-                                                        data-deskripsi="<?php echo htmlspecialchars($kategori['deskripsi'] ?? ''); ?>">
-                                                    <i class="fas fa-edit"></i>
-                                                </button>
-                                                <button class="btn btn-sm btn-outline-danger hapus-kategori" 
-                                                        data-id="<?php echo $kategori['id']; ?>">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal Edit Kategori -->
-    <div class="modal fade" id="editKategoriModal" tabindex="-1" aria-labelledby="editKategoriModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="editKategoriModalLabel">Edit Kategori UMKM</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <form id="formEditKategori" method="POST" action="">
-                    <div class="modal-body">
-                        <input type="hidden" id="edit_id" name="id">
-                        <div class="mb-3">
-                            <label for="edit_nama_kategori" class="form-label">Nama Kategori</label>
-                            <input type="text" class="form-control" id="edit_nama_kategori" name="nama_kategori" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="edit_deskripsi" class="form-label">Deskripsi</label>
-                            <input type="text" class="form-control" id="edit_deskripsi" name="deskripsi">
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                        <button type="submit" class="btn btn-primary">Simpan Perubahan</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal Konfirmasi Hapus -->
-    <div class="modal fade" id="hapusKategoriModal" tabindex="-1" aria-labelledby="hapusKategoriModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="hapusKategoriModalLabel">Konfirmasi Hapus</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <form id="formHapusKategori" method="POST" action="">
-                    <div class="modal-body">
-                        <input type="hidden" id="hapus_id" name="hapus_id">
-                        <p>Apakah Anda yakin ingin menghapus kategori ini? Semua UMKM dalam kategori ini akan menjadi tidak terkategori.</p>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                        <button type="submit" class="btn btn-danger">Hapus</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i> Simpan UMKM
+                        </button>
                     </div>
                 </form>
             </div>
@@ -909,11 +659,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
     <!-- Main JavaScript -->
     <script>
         // Toggle Sidebar
-        $(document).ready(function() {
-            $('.toggle-btn').on('click', function() {
-                $('.sidebar').toggleClass('collapsed');
-                $('.main-content').toggleClass('expanded');
-            });
+        $('.toggle-btn').click(function() {
+            $('.sidebar').toggleClass('collapsed');
+            $('.main-content').toggleClass('expanded');
         });
 
         // Submenu Toggle
@@ -924,74 +672,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
             $(this).siblings('.submenu').toggleClass('show');
         });
 
-        // Inisialisasi tooltips
-        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl)
-        });
-
-        // Fungsi pencarian
-        $('#searchInput').on('keyup', function() {
-            var value = $(this).val().toLowerCase();
-            $('table tbody tr').filter(function() {
-                $(this).toggle($(this).text().toLowerCase().indexOf(value) > -1)
-            });
-        });
-
-        // Tombol refresh
-        $('#refreshBtn').click(function() {
-            location.reload();
-        });
-
-        // Edit Kategori
-        $('.edit-kategori').click(function() {
-            var id = $(this).data('id');
-            var nama = $(this).data('nama');
-            var deskripsi = $(this).data('deskripsi');
+        // Image Preview
+        function previewImage(input) {
+            const preview = document.getElementById('imagePreview');
+            const file = input.files[0];
+            const reader = new FileReader();
             
-            $('#edit_id').val(id);
-            $('#edit_nama_kategori').val(nama);
-            $('#edit_deskripsi').val(deskripsi);
+            reader.onload = function(e) {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+            }
             
-            var editModal = new bootstrap.Modal(document.getElementById('editKategoriModal'));
-            editModal.show();
-        });
-
-        // Hapus Kategori
-        $('.hapus-kategori').click(function() {
-            var id = $(this).data('id');
-            $('#hapus_id').val(id);
-            
-            var hapusModal = new bootstrap.Modal(document.getElementById('hapusKategoriModal'));
-            hapusModal.show();
-        });
-
-        // Form Tambah Kategori
-        $('#formTambahKategori').submit(function(e) {
-            e.preventDefault();
-            // AJAX untuk menambah kategori
-            alert('Kategori berhasil ditambahkan!');
-            this.reset();
-            // Di sini bisa tambahkan AJAX untuk submit form
-        });
-
-        // Form Edit Kategori
-        $('#formEditKategori').submit(function(e) {
-            e.preventDefault();
-            // AJAX untuk edit kategori
-            alert('Perubahan berhasil disimpan!');
-            $('#editKategoriModal').modal('hide');
-            // Di sini bisa tambahkan AJAX untuk submit form
-        });
-
-        // Form Hapus Kategori
-        $('#formHapusKategori').submit(function(e) {
-            e.preventDefault();
-            // AJAX untuk hapus kategori
-            alert('Kategori berhasil dihapus!');
-            $('#hapusKategoriModal').modal('hide');
-            // Di sini bisa tambahkan AJAX untuk submit form
-        });
+            if (file) {
+                reader.readAsDataURL(file);
+            } else {
+                preview.src = '';
+                preview.style.display = 'none';
+            }
+        }
     </script>
 </body>
 </html>

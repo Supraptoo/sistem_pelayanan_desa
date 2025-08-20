@@ -717,7 +717,7 @@ $rt_terisi = 68;
      <!-- Sidebar -->
     <div class="sidebar">
         <div class="sidebar-header">
-            <a href="../admin/dashboard.php" class="sidebar-brand">
+            <a href="dashboard.php" class="sidebar-brand">
                 <img src="../assets/images/logo.png" alt="Logo <?php echo $desa_nama; ?>">
                 <span><?php echo $desa_nama; ?></span>
             </a>
@@ -725,7 +725,7 @@ $rt_terisi = 68;
         <div class="sidebar-menu-container">
             <ul class="sidebar-menu">
                 <li>
-                    <a href="dashboard.php" class="active">
+                    <a href="../admin/dashboard.php" class="active">
                         <i class="fas fa-tachometer-alt"></i>
                         <span class="menu-text">Dashboard</span>
                     </a>
@@ -738,9 +738,9 @@ $rt_terisi = 68;
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
                     <ul class="submenu">
-                        <li><a href="../data_warga/penduduk.php">Data Penduduk</a></li>
-                        <li><a href="../data_warga/keluarga.php">Data Keluarga</a></li>
-                        <li><a href="../data_warga/rt-rw.php">Data RT/RW</a></li>
+                        <li><a href="../admin/data_warga/keluarga.php">Data Keluarga</a></li>
+                        <li><a href="../admin/data_warga/rt-rw.php">Data RT/RW</a></li>
+                        <li><a href="../admin/data_warga/penduduk.php">Data Penduduk</a></li>
                     </ul>
                 </li>
                 <li>
@@ -750,8 +750,8 @@ $rt_terisi = 68;
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
                     <ul class="submenu">
-                        <li><a href="../berita/berita.php">Kelola Berita</a></li>
-                        <li><a href="../berita/kategori_berita.php">Kategori</a></li>
+                        <li><a href="../admin/berita/berita.php">Kelola Berita</a></li>
+                        <li><a href="../admin/berita/kategori_berita.php">Kategori</a></li>
                     </ul>
                 </li>
                 <li>
@@ -761,8 +761,8 @@ $rt_terisi = 68;
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
                     <ul class="submenu">
-                        <li><a href="../umkm/umkm.php">Daftar UMKM</a></li>
-                        <li><a href="../umkm/kategori-umkm.php">Kategori</a></li>
+                        <li><a href="../admin/umkm/umkm.php">Daftar UMKM</a></li>
+                        <li><a href="../admin/umkm/kategori-umkm.php">Kategori</a></li>
                     </ul>
                 </li>
                 <li>
@@ -772,13 +772,13 @@ $rt_terisi = 68;
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
                     <ul class="submenu">
-                        <li><a href="../galeri/foto.php">Foto</a></li>
+                        <li><a href="../admin/galeri/foto.php">Foto</a></li>
                         
                     </ul>
                 </li>
              
                 <li>
-                    <a href="../../logout.php">
+                    <a href="../logout.php">
                         <i class="fas fa-sign-out-alt"></i>
                         <span class="menu-text">Keluar</span>
                     </a>

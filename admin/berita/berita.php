@@ -3,321 +3,178 @@ session_start();
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../config/functions.php';
 
+// Pesan operasi berhasil/tidak
+$message = '';
+$message_type = '';
+
+// Handle delete berita
+if (isset($_GET['delete'])) {
+    $id = (int)$_GET['delete'];
+    
+    try {
+        // Hapus gambar terlebih dahulu jika ada
+        $stmt = $pdo->prepare("SELECT gambar_path FROM berita WHERE id = ?");
+        $stmt->execute([$id]);
+        $gambar = $stmt->fetchColumn();
+        
+        if ($gambar && file_exists("../uploads/berita/" . $gambar)) {
+            unlink("../uploads/berita/" . $gambar);
+        }
+        
+        // Hapus dari database
+        $stmt = $pdo->prepare("DELETE FROM berita WHERE id = ?");
+        $stmt->execute([$id]);
+        
+        $message = 'Berita berhasil dihapus!';
+        $message_type = 'success';
+    } catch (PDOException $e) {
+        $message = 'Gagal menghapus berita: ' . $e->getMessage();
+        $message_type = 'danger';
+    }
+}
+
+// Handle publish/unpublish
+if (isset($_GET['toggle_status'])) {
+    $id = (int)$_GET['toggle_status'];
+    
+    try {
+        $stmt = $pdo->prepare("UPDATE berita SET status = IF(status='published', 'draft', 'published') WHERE id = ?");
+        $stmt->execute([$id]);
+        
+        $message = 'Status berita berhasil diubah!';
+        $message_type = 'success';
+    } catch (PDOException $e) {
+        $message = 'Gagal mengubah status berita: ' . $e->getMessage();
+        $message_type = 'danger';
+    }
+}
+
+// Handle form tambah berita
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $judul = $_POST['judul'] ?? '';
+    $isi = $_POST['isi'] ?? '';
+    $embed_link = $_POST['embed_link'] ?? '';
+    $status = $_POST['status'] ?? 'draft';
+    $kategori_id = $_POST['kategori_id'] ?? 1;
+    $tanggal = date('Y-m-d H:i:s');
+    $content_type = $_POST['content_type'] ?? 'manual'; // manual atau link
+    
+    try {
+        // Handle file upload
+        $gambar = '';
+        if (isset($_FILES['gambar']) && $_FILES['gambar']['error'] === UPLOAD_ERR_OK) {
+            $file = $_FILES['gambar'];
+            $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+            $gambar = 'berita_' . time() . '.' . $ext;
+            $upload_dir = '../uploads/berita/';
+            
+            if (!file_exists($upload_dir)) {
+                mkdir($upload_dir, 0755, true);
+            }
+            
+            if (!move_uploaded_file($file['tmp_name'], $upload_dir . $gambar)) {
+                throw new Exception("Gagal mengupload gambar");
+            }
+        }
+        
+        // Jika input berupa link, proses link tersebut
+        if ($content_type === 'link' && !empty($embed_link)) {
+            $isi = processEmbedLink($embed_link);
+            if (empty($judul)) {
+                $judul = "Berita dari " . parse_url($embed_link, PHP_URL_HOST);
+            }
+        }
+        
+        // Insert ke database
+ $slug = createSlug($judul);
+    
+    $stmt = $pdo->prepare("INSERT INTO berita (judul, slug, isi, gambar_path, embed_link, status, tanggal_publish, kategori_id, created_by) 
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute([
+        $judul, 
+        $slug,
+        $isi, 
+        $gambar, 
+        $embed_link, 
+        $status, 
+        $tanggal, 
+        $kategori_id, 
+        $_SESSION['admin_id'] ?? null
+    ]);
+    
+    $message = 'Berita berhasil ditambahkan!';
+    $message_type = 'success';
+    
+    // Redirect untuk menghindari resubmit
+    header("Location ../../pages/berita.php:?success=1");
+    exit();
+} catch (Exception $e) {
+    $message = 'Gagal menambahkan berita: ' . $e->getMessage();
+    $message_type = 'danger';
+}
+
+}
+
+// Fungsi untuk memproses embed link
+function processEmbedLink($url) {
+    // Instagram
+    if (preg_match('/instagram\.com\/p\/([a-zA-Z0-9_-]+)/', $url, $matches)) {
+        $post_id = $matches[1];
+        return '<blockquote class="instagram-media" data-instgrm-permalink="https://www.instagram.com/p/'.$post_id.'/" 
+                style="background:#FFF; border:0; border-radius:3px; box-shadow:0 0 1px 0 rgba(0,0,0,0.5),0 1px 10px 0 rgba(0,0,0,0.15); 
+                margin: 1px; max-width:540px; min-width:326px; padding:0; width:99.375%; width:-webkit-calc(100% - 2px); 
+                width:calc(100% - 2px);"></blockquote><script async src="//www.instagram.com/embed.js"></script>';
+    }
+    // YouTube
+    elseif (preg_match('/youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/', $url, $matches) || 
+            preg_match('/youtu\.be\/([a-zA-Z0-9_-]+)/', $url, $matches)) {
+        $video_id = $matches[1];
+        return '<div class="embed-responsive embed-responsive-16by9">
+                <iframe class="embed-responsive-item" src="https://www.youtube.com/embed/'.$video_id.'" 
+                frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                allowfullscreen></iframe></div>';
+    }
+    // Twitter
+    elseif (preg_match('/twitter\.com\/[a-zA-Z0-9_]+\/status\/([0-9]+)/', $url, $matches)) {
+        $tweet_id = $matches[1];
+        return '<blockquote class="twitter-tweet"><a href="'.$url.'"></a></blockquote> 
+                <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>';
+    }
+    // Default untuk link biasa
+    else {
+        return '<p><a href="'.$url.'" target="_blank">'.$url.'</a></p>';
+    }
+}
+
+// Ambil semua berita untuk ditampilkan
+try {
+    $stmt = $pdo->query("SELECT b.*, bk.nama_kategori 
+                        FROM berita b
+                        LEFT JOIN berita_kategori bk ON b.kategori_id = bk.id
+                        ORDER BY b.tanggal_publish DESC");
+    $all_berita = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Ambil kategori berita untuk dropdown
+    $stmt = $pdo->query("SELECT * FROM berita_kategori");
+    $kategori_berita = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    die("Error mengambil data berita: " . $e->getMessage());
+}
+
 // Data desa
 $desa_nama = "Desa Winduaji";
 $desa_lokasi = "Kecamatan Paninggaran, Kabupaten Pekalongan, Provinsi Jawa Tengah";
-$desa_motto = "Bersama Membangun Desa yang Mandiri dan Berbudaya";
-
-try {
-    // Ambil data berita dari database dengan JOIN yang benar
-    $query = "SELECT b.*, k.nama_kategori 
-              FROM berita b 
-              JOIN berita_kategori k ON b.kategori_id = k.id 
-              ORDER BY b.tanggal_publish DESC";
-    
-    // Eksekusi query dengan penanganan error
-    $stmt = $db->prepare($query);
-    $stmt->execute();
-    $berita = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    if ($berita === false) {
-        throw new PDOException("Gagal mengambil data berita");
-    }
-    
-} catch (PDOException $e) {
-    // Log error dan tampilkan pesan yang ramah pengguna
-    error_log("Database error: " . $e->getMessage());
-    die("Terjadi kesalahan saat mengambil data berita. Silakan coba lagi nanti.");
-}
-
-// Fungsi untuk menambahkan berita dari URL
-function add_news_from_url($url, $kategori_id, $db) {
-    // Validasi URL
-    if (!filter_var($url, FILTER_VALIDATE_URL)) {
-        return ['success' => false, 'message' => 'URL tidak valid'];
-    }
-
-    // Dapatkan konten dari URL (simplified - dalam produksi gunakan library seperti Goutte)
-    $html = @file_get_contents($url);
-    if (!$html) {
-        return ['success' => false, 'message' => 'Gagal mengambil konten dari URL'];
-    }
-
-    // Parsing sederhana (dalam produksi gunakan DOMDocument atau library parsing HTML)
-    preg_match('/<title>(.*?)<\/title>/i', $html, $titleMatches);
-    $judul = $titleMatches[1] ?? 'Berita dari ' . parse_url($url, PHP_URL_HOST);
-    
-    // Ambil konten utama (simplified)
-    preg_match('/<body.*?>(.*?)<\/body>/si', $html, $bodyMatches);
-    $isi = strip_tags($bodyMatches[1] ?? '');
-    $isi = substr($isi, 0, 5000); // Batasi konten
-
-    // Generate slug
-    $slug = create_slug($judul);
-
-    // Cek duplikat
-    $existing = $db->prepare("SELECT id FROM berita WHERE slug = ?");
-    $existing->execute([$slug]);
-    
-    if ($existing->fetch()) {
-        return ['success' => false, 'message' => 'Berita dengan judul serupa sudah ada'];
-    }
-
-    // Simpan ke database
-    try {
-        $stmt = $db->prepare("INSERT INTO berita (kategori_id, judul, slug, isi, penulis, tanggal_publish, status, sumber) 
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([
-            $kategori_id,
-            $judul,
-            $slug,
-            $isi,
-            'Sumber Eksternal',
-            date('Y-m-d'),
-            'published',
-            $url
-        ]);
-        
-        return ['success' => true, 'message' => 'Berita berhasil diimpor dari URL'];
-    } catch (PDOException $e) {
-        return ['success' => false, 'message' => 'Error database: ' . $e->getMessage()];
-    }
-}
-
-// Proses tambah berita
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tambah_berita'])) {
-    $judul = clean_input($_POST['judul']);
-    $slug = create_slug($judul);
-    $kategori_id = (int)$_POST['kategori_id'];
-    $isi = clean_input($_POST['isi']);
-    $penulis = clean_input($_POST['penulis']);
-    $tanggal_publish = $_POST['tanggal_publish'];
-    $status = $_POST['status'];
-    $meta_title = clean_input($_POST['meta_title']);
-    $meta_description = clean_input($_POST['meta_description']);
-    $meta_keywords = clean_input($_POST['meta_keywords']);
-    $sumber = clean_input($_POST['sumber']);
-
-    // Upload gambar
-    $gambar_path = null;
-    if ($_FILES['gambar']['error'] === UPLOAD_ERR_OK) {
-        $gambar_path = upload_image($_FILES['gambar'], 'berita');
-    }
-
-    $stmt = $db->prepare("INSERT INTO berita (kategori_id, judul, slug, isi, penulis, tanggal_publish, status, gambar_path, meta_title, meta_description, meta_keywords, sumber) 
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->execute([$kategori_id, $judul, $slug, $isi, $penulis, $tanggal_publish, $status, $gambar_path, $meta_title, $meta_description, $meta_keywords, $sumber]);
-
-    $_SESSION['success_message'] = 'Berita berhasil ditambahkan';
-    header('Location: berita.php');
-    exit;
-}
-
-// Proses tambah berita dari URL
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tambah_berita_url'])) {
-    $url = clean_input($_POST['url']);
-    $kategori_id = (int)$_POST['url_kategori_id'];
-    
-    $result = add_news_from_url($url, $kategori_id, $db);
-    
-    $_SESSION[$result['success'] ? 'success_message' : 'error_message'] = $result['message'];
-    header('Location: berita.php');
-    exit;
-}
-
-// Proses edit berita
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_berita'])) {
-    $id = (int)$_POST['id'];
-    $judul = clean_input($_POST['judul']);
-    $slug = create_slug($judul);
-    $kategori_id = (int)$_POST['kategori_id'];
-    $isi = $_POST['isi'];
-    $penulis = clean_input($_POST['penulis']);
-    $tanggal_publish = $_POST['tanggal_publish'];
-    $status = $_POST['status'];
-    $meta_title = clean_input($_POST['meta_title']);
-    $meta_description = clean_input($_POST['meta_description']);
-    $meta_keywords = clean_input($_POST['meta_keywords']);
-    $sumber = clean_input($_POST['sumber']);
-
-    // Cek apakah ada gambar baru diupload
-    $gambar_path = $_POST['gambar_lama'];
-    if ($_FILES['gambar']['error'] === UPLOAD_ERR_OK) {
-        try {
-            if ($gambar_path && file_exists($gambar_path)) {
-                unlink($gambar_path);
-            }
-            $gambar_path = upload_image($_FILES['gambar'], 'berita');
-        } catch (Exception $e) {
-            $_SESSION['error_message'] = $e->getMessage();
-            header('Location: berita.php?edit=' . $id);
-            exit;
-        }
-    }
-
-    $stmt = $db->prepare("UPDATE berita SET 
-                          kategori_id = ?, judul = ?, slug = ?, isi = ?, penulis = ?, 
-                          tanggal_publish = ?, status = ?, gambar_path = ?, meta_title = ?, 
-                          meta_description = ?, meta_keywords = ?, sumber = ?, updated_at = NOW() 
-                          WHERE id = ?");
-    $stmt->execute([$kategori_id, $judul, $slug, $isi, $penulis, $tanggal_publish, $status, $gambar_path, $meta_title, $meta_description, $meta_keywords, $sumber, $id]);
-
-    $_SESSION['success_message'] = 'Berita berhasil diperbarui';
-    header('Location: berita.php');
-    exit;
-}
-
-// Proses hapus berita
-if (isset($_GET['hapus'])) {
-    $id = (int)$_GET['hapus'];
-
-    // Ambil data berita untuk menghapus gambar
-    $berita = $db->query("SELECT gambar_path FROM berita WHERE id = $id")->fetch(PDO::FETCH_ASSOC);
-
-    if ($berita['gambar_path'] && file_exists($berita['gambar_path'])) {
-        unlink($berita['gambar_path']);
-    }
-
-    $db->query("DELETE FROM berita WHERE id = $id");
-    $_SESSION['success_message'] = 'Berita berhasil dihapus';
-    header('Location: berita.php');
-    exit;
-}
-
-// Proses impor berita dari Google News
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['import_news'])) {
-    $query = urlencode(clean_input($_POST['news_query']));
-    $kategori_id = (int)$_POST['import_kategori_id'];
-    
-    $rss_url = "https://news.google.com/rss/search?q={$query}&hl=id&gl=ID&ceid=ID:id";
-    $news = fetch_google_news($rss_url);
-    
-    if ($news) {
-        $imported_count = 0;
-        
-        foreach ($news as $item) {
-            $existing = $db->prepare("SELECT id FROM berita WHERE judul = ?");
-            $existing->execute([$item['title']]);
-            
-            if (!$existing->fetch()) {
-                $stmt = $db->prepare("INSERT INTO berita (kategori_id, judul, slug, isi, penulis, tanggal_publish, status, meta_title, meta_description, sumber) 
-                                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([
-                    $kategori_id,
-                    $item['title'],
-                    create_slug($item['title']),
-                    $item['description'] . '<p><a href="' . $item['link'] . '" target="_blank">Baca selengkapnya</a></p>',
-                    'Google News',
-                    date('Y-m-d', strtotime($item['pubDate'])),
-                    'published',
-                    $item['title'],
-                    substr($item['description'], 0, 160),
-                    $item['link']
-                ]);
-                $imported_count++;
-            }
-        }
-        
-        $_SESSION['success_message'] = "Berhasil mengimpor {$imported_count} berita dari Google News";
-    } else {
-        $_SESSION['error_message'] = "Gagal mengambil berita dari Google News";
-    }
-    
-    header('Location: berita.php');
-    exit;
-}
-
-// Ambil data berita untuk edit
-$edit_berita = null;
-if (isset($_GET['edit'])) {
-    $id = (int)$_GET['edit'];
-    $edit_berita = $db->query("SELECT * FROM berita WHERE id = $id")->fetch(PDO::FETCH_ASSOC);
-}
-
-// Fungsi untuk mengambil berita dari Google News RSS
-function fetch_google_news($rss_url) {
-    $news = [];
-    
-    try {
-        $xml = simplexml_load_file($rss_url);
-        if ($xml) {
-            foreach ($xml->channel->item as $item) {
-                $news[] = [
-                    'title' => (string)$item->title,
-                    'link' => (string)$item->link,
-                    'description' => (string)$item->description,
-                    'pubDate' => (string)$item->pubDate
-                ];
-            }
-        }
-    } catch (Exception $e) {
-        error_log("Error fetching Google News: " . $e->getMessage());
-        return false;
-    }
-    
-    return $news;
-}
-
-// Fungsi untuk membersihkan input
-function clean_input($data) {
-    $data = trim($data);
-    $data = stripslashes($data);
-    $data = htmlspecialchars($data);
-    return $data;
-}
-
-// Fungsi untuk membuat slug dari judul
-function create_slug($string) {
-    $slug = preg_replace('/[^A-Za-z0-9-]+/', '-', $string);
-    $slug = strtolower($slug);
-    return $slug;
-}
-
-// Fungsi untuk upload gambar
-function upload_image($file, $folder) {
-    $target_dir = "assets/images/$folder/";
-    if (!file_exists($target_dir)) {
-        mkdir($target_dir, 0777, true);
-    }
-
-    $imageFileType = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    $filename = uniqid() . '.' . $imageFileType;
-    $target_file = $target_dir . $filename;
-
-    $check = getimagesize($file['tmp_name']);
-    if ($check === false) {
-        throw new Exception("File bukan gambar");
-    }
-
-    if ($file['size'] > 2000000) {
-        throw new Exception("Ukuran gambar terlalu besar (maks 2MB)");
-    }
-
-    $allowed = ['jpg', 'jpeg', 'png', 'gif'];
-    if (!in_array($imageFileType, $allowed)) {
-        throw new Exception("Hanya format JPG, JPEG, PNG & GIF yang diperbolehkan");
-    }
-
-    if (move_uploaded_file($file['tmp_name'], $target_file)) {
-        return $target_file;
-    } else {
-        throw new Exception("Gagal mengupload gambar");
-    }
-}
 ?>
 
 <!DOCTYPE html>
 <html lang="id">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kelola Berita - <?php echo $desa_nama; ?></title>
+    <title>Kelola Berita - Admin <?php echo $desa_nama; ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
-    <link href="https://cdn.datatables.net/buttons/2.4.2/css/buttons.bootstrap5.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -558,6 +415,40 @@ function upload_image($file, $folder) {
             color: var(--primary-color);
         }
 
+        .user-menu {
+            display: flex;
+            align-items: center;
+        }
+
+        .user-menu .dropdown-toggle {
+            display: flex;
+            align-items: center;
+            background: none;
+            border: none;
+            color: var(--gray-dark);
+            padding: 0.25rem 0.5rem;
+            border-radius: var(--border-radius);
+            transition: var(--transition);
+        }
+
+        .user-menu .dropdown-toggle:hover {
+            background-color: var(--gray-light);
+        }
+
+        .user-menu .user-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            margin-right: 8px;
+            object-fit: cover;
+            border: 2px solid var(--gray-light);
+        }
+
+        .user-menu .user-name {
+            margin-right: 6px;
+            font-weight: 500;
+        }
+
         /* Content Section */
         .content-section {
             padding: 2rem;
@@ -579,24 +470,6 @@ function upload_image($file, $folder) {
             margin: 0;
         }
 
-        /* Card Styles */
-        .card {
-            border: none;
-            border-radius: var(--border-radius);
-            box-shadow: var(--shadow-sm);
-            margin-bottom: 1.5rem;
-        }
-
-        .card-header {
-            background-color: white;
-            border-bottom: 1px solid var(--gray-light);
-            font-weight: 600;
-            padding: 1rem 1.5rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
         /* Table Styles */
         .table-responsive {
             border-radius: var(--border-radius);
@@ -607,6 +480,7 @@ function upload_image($file, $folder) {
 
         .table {
             margin-bottom: 0;
+            width: 100%;
         }
 
         .table thead th {
@@ -620,13 +494,13 @@ function upload_image($file, $folder) {
         .table tbody td {
             padding: 0.75rem 1rem;
             vertical-align: middle;
+            border-top: 1px solid var(--gray-light);
         }
 
         .table tbody tr:hover {
             background-color: var(--primary-light);
         }
 
-        /* Badges */
         .badge {
             padding: 0.5em 0.75em;
             font-weight: 600;
@@ -634,68 +508,112 @@ function upload_image($file, $folder) {
             font-size: 0.75rem;
         }
 
+        /* Status Badges */
         .badge-published {
             background-color: rgba(76, 201, 240, 0.1);
             color: var(--success-color);
-            border: 1px solid var(--success-color);
         }
-
+        
         .badge-draft {
             background-color: rgba(248, 150, 30, 0.1);
             color: var(--warning-color);
-            border: 1px solid var(--warning-color);
         }
-
-        .badge-category {
-            background-color: var(--primary-light);
-            color: var(--primary-color);
+        
+        .action-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            margin-right: 5px;
+            transition: var(--transition);
         }
-
-        /* Buttons */
-        .btn-primary-custom {
+        
+        .action-btn:hover {
+            transform: scale(1.1);
+        }
+        
+        .btn-add {
             background-color: var(--primary-color);
-            border-color: var(--primary-color);
             color: white;
-        }
-
-        .btn-primary-custom:hover {
-            background-color: var(--secondary-color);
-            border-color: var(--secondary-color);
-        }
-
-        .btn-import {
-            background-color: #34a853;
-            border-color: #34a853;
-            color: white;
-        }
-
-        .btn-import:hover {
-            background-color: #2d8e47;
-            border-color: #2d8e47;
-        }
-
-        /* Source Badge */
-        .source-badge {
-            font-size: 0.7rem;
-            padding: 0.25rem 0.5rem;
-            background-color: var(--gray-light);
-            border-radius: 4px;
-            display: inline-block;
-            margin-top: 0.5rem;
-            color: var(--gray-dark);
-        }
-
-        .source-badge a {
-            color: var(--primary-color);
-            text-decoration: none;
-        }
-
-        /* Preview Image */
-        .preview-image {
-            max-height: 200px;
-            object-fit: contain;
+            border: none;
+            padding: 0.5rem 1rem;
             border-radius: var(--border-radius);
-            margin-bottom: 1rem;
+            display: inline-flex;
+            align-items: center;
+            transition: var(--transition);
+        }
+        
+        .btn-add:hover {
+            background-color: var(--secondary-color);
+            color: white;
+            transform: translateY(-2px);
+        }
+        
+        .btn-add i {
+            margin-right: 8px;
+        }
+
+        /* Alert Message */
+        .alert {
+            border-radius: var(--border-radius);
+            border-left: 4px solid;
+        }
+
+        /* Form Styles */
+        .form-container {
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow-sm);
+            padding: 2rem;
+        }
+        
+        .form-label {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        
+        .form-control, .form-select {
+            border-radius: var(--border-radius);
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--gray-light);
+        }
+        
+        .form-control:focus, .form-select:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.25rem rgba(67, 97, 238, 0.25);
+        }
+        
+        .btn-submit {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: var(--border-radius);
+            font-weight: 600;
+            transition: var(--transition);
+        }
+        
+        .btn-submit:hover {
+            background-color: var(--secondary-color);
+            transform: translateY(-2px);
+        }
+        
+        .preview-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: var(--border-radius);
+            margin-top: 1rem;
+            display: none;
+        }
+        
+        .embed-preview {
+            margin-top: 1rem;
+            border: 1px dashed var(--gray-medium);
+            padding: 1rem;
+            border-radius: var(--border-radius);
+            display: none;
         }
 
         /* Responsive Adjustments */
@@ -703,38 +621,86 @@ function upload_image($file, $folder) {
             .sidebar {
                 transform: translateX(-100%);
             }
-
+            
             .sidebar.show {
                 transform: translateX(0);
             }
-
+            
             .main-content {
                 margin-left: 0;
             }
-
+            
             .sidebar.collapsed {
                 transform: translateX(-100%);
             }
-
+            
             .sidebar.collapsed.show {
                 transform: translateX(0);
                 width: var(--sidebar-collapsed-width);
             }
-
+            
             .main-content.expanded {
                 margin-left: 0;
             }
         }
 
-        @media (max-width: 576px) {
-            .content-section {
-                padding: 1.5rem 1rem;
-            }
-            
+        @media (max-width: 768px) {
             .section-header {
                 flex-direction: column;
                 align-items: flex-start;
             }
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: var(--gray-light);
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: var(--primary-color);
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--secondary-color);
+        }
+
+        /* Animation for sidebar toggle */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .sidebar-menu-container::-webkit-scrollbar {
+            width: 4px;
+        }
+   .nav-tabs .nav-link {
+            border: none;
+            color: var(--gray-dark);
+            font-weight: 500;
+            padding: 0.75rem 1.5rem;
+        }
+        
+        .nav-tabs .nav-link.active {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--primary-color);
+            background-color: transparent;
+        }
+        
+        .tab-content {
+            padding: 1.5rem 0;
+        }
+        
+        .embed-preview {
+            background-color: var(--primary-light);
+            padding: 1rem;
+            border-radius: var(--border-radius);
+            margin-top: 1rem;
         }
     </style>
 </head>
@@ -751,7 +717,7 @@ function upload_image($file, $folder) {
         <div class="sidebar-menu-container">
             <ul class="sidebar-menu">
                 <li>
-                    <a href="../admin/dashboard.php" class="active">
+                    <a href="../admin/dashboard.php">
                         <i class="fas fa-tachometer-alt"></i>
                         <span class="menu-text">Dashboard</span>
                     </a>
@@ -764,20 +730,20 @@ function upload_image($file, $folder) {
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
                     <ul class="submenu">
-                        <li><a href="../data_warga/penduduk.php">Data Penduduk</a></li>
-                        <li><a href="../data_warga/keluarga.php">Data Keluarga</a></li>
-                        <li><a href="../data_warga/rt-rw.php">Data RT/RW</a></li>
+                        <li><a href="../admin/data_warga/keluarga.php">Data Keluarga</a></li>
+                        <li><a href="../admin/data_warga/rt-rw.php">Data RT/RW</a></li>
+                        <li><a href="../admin/data_warga/penduduk.php">Data Penduduk</a></li>
                     </ul>
                 </li>
                 <li>
-                    <a href="javascript:void(0);" class="has-submenu">
+                    <a href="javascript:void(0);" class="has-submenu active">
                         <i class="fas fa-newspaper"></i>
                         <span class="menu-text">Berita</span>
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
-                    <ul class="submenu">
-                        <li><a href="../berita/berita.php">Kelola Berita</a></li>
-                        <li><a href="../berita/kategori_berita.php">Kategori</a></li>
+                    <ul class="submenu show">
+                        <li><a href="../admin/berita/berita.php" class="active">Kelola Berita</a></li>
+                        <li><a href="../admin/berita/kategori_berita.php">Kategori</a></li>
                     </ul>
                 </li>
                 <li>
@@ -787,8 +753,8 @@ function upload_image($file, $folder) {
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
                     <ul class="submenu">
-                        <li><a href="../umkm/umkm.php">Daftar UMKM</a></li>
-                        <li><a href="../umkm/kategori-umkm.php">Kategori</a></li>
+                        <li><a href="../admin/umkm/umkm.php">Daftar UMKM</a></li>
+                        <li><a href="../admin/umkm/kategori-umkm.php">Kategori</a></li>
                     </ul>
                 </li>
                 <li>
@@ -798,13 +764,12 @@ function upload_image($file, $folder) {
                         <i class="fas fa-chevron-down menu-arrow"></i>
                     </a>
                     <ul class="submenu">
-                        <li><a href="../galeri/foto.php">Foto</a></li>
-                        
+                        <li><a href="../admin/galeri/foto.php">Foto</a></li>
                     </ul>
                 </li>
              
                 <li>
-                    <a href="../../logout.php">
+                    <a href="../logout.php">
                         <i class="fas fa-sign-out-alt"></i>
                         <span class="menu-text">Keluar</span>
                     </a>
@@ -821,7 +786,7 @@ function upload_image($file, $folder) {
                 <button class="toggle-btn me-3">
                     <i class="fas fa-bars"></i>
                 </button>
-                <span class="d-none d-md-inline">Dashboard Admin</span>
+                <span class="d-none d-md-inline">Tambah Berita Baru</span>
             </div>
             <div class="user-menu">
                 <div class="dropdown">
@@ -830,100 +795,76 @@ function upload_image($file, $folder) {
                         <span class="user-name d-none d-md-inline">Admin</span>
                         <i class="fas fa-chevron-down d-none d-md-inline"></i>
                     </button>
-                   
                 </div>
             </div>
         </nav>
 
-        <!-- Content Section -->
-        <div class="content-section">
+       <div class="content-section">
             <div class="section-header">
                 <h1 class="section-title">Kelola Berita</h1>
-                <div class="d-flex gap-2">
-                    <button class="btn btn-import" data-bs-toggle="modal" data-bs-target="#importNewsModal">
-                        <i class="fas fa-cloud-download-alt"></i> Impor Berita
-                    </button>
-                    <button class="btn btn-primary-custom" data-bs-toggle="modal" data-bs-target="#tambahBeritaModal">
-                        <i class="fas fa-plus"></i> Tambah Berita
+                <div>
+                    <button class="btn btn-add" data-bs-toggle="modal" data-bs-target="#tambahBeritaModal">
+                        <i class="fas fa-plus me-2"></i>Tambah Berita
                     </button>
                 </div>
             </div>
 
-            <?php if (isset($_SESSION['success_message'])): ?>
-                <div class="alert alert-success alert-dismissible fade show" role="alert">
-                    <?php echo $_SESSION['success_message']; ?>
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-                <?php unset($_SESSION['success_message']); ?>
-            <?php endif; ?>
-
-            <?php if (isset($_SESSION['error_message'])): ?>
-                <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                    <?php echo $_SESSION['error_message']; ?>
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-                <?php unset($_SESSION['error_message']); ?>
+            <!-- Alert Message -->
+            <?php if ($message): ?>
+            <div class="alert alert-<?= $message_type ?> alert-dismissible fade show" role="alert" style="border-left-color: var(--<?= $message_type ?>-color)">
+                <?= $message ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
             <?php endif; ?>
 
             <div class="card">
-                <div class="card-header">
-                    <div>
-                        <i class="fas fa-list"></i> Daftar Berita
-                    </div>
-                    <div class="d-flex align-items-center">
-                        <div class="form-check form-switch me-3">
-                            <input class="form-check-input" type="checkbox" id="showSourceToggle" checked>
-                            <label class="form-check-label" for="showSourceToggle">Tampilkan Sumber</label>
-                        </div>
-                    </div>
-                </div>
-                <div class="card-body">
+                <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table id="beritaTable" class="table table-hover">
+                        <table class="table table-hover">
                             <thead>
                                 <tr>
-                                    <th>No</th>
+                                    <th width="50">#</th>
                                     <th>Judul</th>
                                     <th>Kategori</th>
-                                    <th>Tanggal</th>
-                                    <th>Status</th>
-                                    <th>Aksi</th>
+                                    <th width="150">Tanggal</th>
+                                    <th width="120">Status</th>
+                                    <th width="150">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($berita as $index => $item): ?>
+                                <?php if (count($all_berita) > 0): ?>
+                                    <?php foreach ($all_berita as $index => $berita): ?>
                                     <tr>
-                                        <td><?php echo $index + 1; ?></td>
+                                        <td><?= $index + 1 ?></td>
                                         <td>
-                                            <?php echo $item['judul']; ?>
-                                            <?php if ($item['sumber']): ?>
-                                                <div class="source-badge source-info">
-                                                    Sumber: 
-                                                    <?php if (filter_var($item['sumber'], FILTER_VALIDATE_URL)): ?>
-                                                        <a href="<?php echo $item['sumber']; ?>" target="_blank">Link Eksternal</a>
-                                                    <?php else: ?>
-                                                        <?php echo $item['sumber']; ?>
-                                                    <?php endif; ?>
-                                                </div>
-                                            <?php endif; ?>
+                                            <strong><?= htmlspecialchars($berita['judul']) ?></strong><br>
+                                            <small class="text-muted"><?= excerpt($berita['isi'], 50) ?></small>
                                         </td>
-                                        <td><span class="badge badge-category"><?php echo $item['nama_kategori']; ?></span></td>
-                                        <td><?php echo date('d M Y', strtotime($item['tanggal_publish'])); ?></td>
+                                        <td><?= htmlspecialchars($berita['nama_kategori'] ?? 'Umum') ?></td>
+                                        <td><?= date('d M Y', strtotime($berita['tanggal_publish'])) ?></td>
                                         <td>
-                                            <span class="badge <?php echo $item['status'] == 'published' ? 'badge-published' : 'badge-draft'; ?>">
-                                                <?php echo ucfirst($item['status']); ?>
+                                            <span class="badge <?= $berita['status'] === 'published' ? 'badge-published' : 'badge-draft' ?>">
+                                                <?= ucfirst($berita['status']) ?>
                                             </span>
                                         </td>
                                         <td>
-                                            <a href="?edit=<?php echo $item['id']; ?>" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editBeritaModal">
+                                            <a href="edit_berita.php?id=<?= $berita['id'] ?>" class="btn btn-sm btn-primary action-btn" title="Edit">
                                                 <i class="fas fa-edit"></i>
                                             </a>
-                                            <a href="?hapus=<?php echo $item['id']; ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Apakah Anda yakin ingin menghapus berita ini?')">
+                                            <a href="?toggle_status=<?= $berita['id'] ?>" class="btn btn-sm btn-warning action-btn" title="<?= $berita['status'] === 'published' ? 'Unpublish' : 'Publish' ?>">
+                                                <i class="fas fa-<?= $berita['status'] === 'published' ? 'eye-slash' : 'eye' ?>"></i>
+                                            </a>
+                                            <a href="?delete=<?= $berita['id'] ?>" class="btn btn-sm btn-danger action-btn" title="Hapus" onclick="return confirm('Yakin ingin menghapus berita ini?')">
                                                 <i class="fas fa-trash"></i>
                                             </a>
                                         </td>
                                     </tr>
-                                <?php endforeach; ?>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="6" class="text-center py-4">Tidak ada berita ditemukan</td>
+                                    </tr>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
@@ -932,177 +873,112 @@ function upload_image($file, $folder) {
         </div>
     </div>
 
-   
-<div class="modal fade" id="tambahBeritaUrlModal" tabindex="-1" aria-labelledby="tambahBeritaUrlModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <form method="POST">
+    <!-- Modal Tambah Berita -->
+    <div class="modal fade" id="tambahBeritaModal" tabindex="-1" aria-labelledby="tambahBeritaModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="tambahBeritaUrlModalLabel">Tambah Berita dari URL</h5>
+                    <h5 class="modal-title" id="tambahBeritaModalLabel">Tambah Berita Baru</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label for="url" class="form-label">URL Berita</label>
-                        <input type="url" class="form-control" id="url" name="url" required placeholder="https://example.com/berita-terbaru">
-                    </div>
-                    <div class="mb-3">
-                        <label for="url_kategori_id" class="form-label">Kategori</label>
-                        <select class="form-select" id="url_kategori_id" name="url_kategori_id" required>
-                            <option value="">Pilih Kategori</option>
-                            <?php foreach ($kategori as $kat): ?>
-                                <option value="<?php echo $kat['id']; ?>"><?php echo $kat['nama_kategori']; ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="alert alert-info">
-                        <i class="fas fa-info-circle"></i> Sistem akan mencoba mengambil konten berita dari URL yang dimasukkan.
+                    <ul class="nav nav-tabs" id="beritaTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual" type="button" role="tab" aria-controls="manual" aria-selected="true">
+                                <i class="fas fa-keyboard me-2"></i>Manual
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="link-tab" data-bs-toggle="tab" data-bs-target="#link" type="button" role="tab" aria-controls="link" aria-selected="false">
+                                <i class="fas fa-link me-2"></i>Tempel Link
+                            </button>
+                        </li>
+                    </ul>
+                    <div class="tab-content" id="beritaTabsContent">
+                        <div class="tab-pane fade show active" id="manual" role="tabpanel" aria-labelledby="manual-tab">
+                            <form id="formManual" action="berita.php" method="POST" enctype="multipart/form-data">
+                                <input type="hidden" name="content_type" value="manual">
+                                <div class="row">
+                                    <div class="col-md-8">
+                                        <div class="mb-3">
+                                            <label for="judul" class="form-label">Judul Berita</label>
+                                            <input type="text" class="form-control" id="judul" name="judul" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="isi" class="form-label">Isi Berita</label>
+                                            <textarea class="form-control" id="isi" name="isi" rows="8" required></textarea>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label for="kategori_id" class="form-label">Kategori</label>
+                                            <select class="form-select" id="kategori_id" name="kategori_id" required>
+                                                <?php foreach ($kategori_berita as $kategori): ?>
+                                                <option value="<?= $kategori['id'] ?>"><?= htmlspecialchars($kategori['nama_kategori']) ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="gambar" class="form-label">Gambar Berita</label>
+                                            <input type="file" class="form-control" id="gambar" name="gambar" accept="image/*">
+                                            <img id="imagePreview" class="preview-image mt-2" src="#" alt="Preview Gambar" style="max-width: 100%; display: none;">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="status" class="form-label">Status</label>
+                                            <select class="form-select" id="status" name="status">
+                                                <option value="draft">Draft</option>
+                                                <option value="published" selected>Published</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="tab-pane fade" id="link" role="tabpanel" aria-labelledby="link-tab">
+                            <form id="formLink" action="berita.php" method="POST">
+                                <input type="hidden" name="content_type" value="link">
+                                <div class="row">
+                                    <div class="col-md-8">
+                                        <div class="mb-3">
+                                            <label for="judul_link" class="form-label">Judul Berita (Opsional)</label>
+                                            <input type="text" class="form-control" id="judul_link" name="judul">
+                                            <small class="text-muted">Biarkan kosong untuk menggunakan judul default</small>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="embed_link" class="form-label">Tempel Link</label>
+                                            <input type="url" class="form-control" id="embed_link" name="embed_link" 
+                                                   placeholder="https://www.instagram.com/p/..." required>
+                                            <small class="text-muted">Contoh: Instagram, YouTube, Twitter, dll.</small>
+                                            <div id="embedPreview" class="embed-preview mt-2" style="display: none;"></div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label for="kategori_id_link" class="form-label">Kategori</label>
+                                            <select class="form-select" id="kategori_id_link" name="kategori_id" required>
+                                                <?php foreach ($kategori_berita as $kategori): ?>
+                                                <option value="<?= $kategori['id'] ?>"><?= htmlspecialchars($kategori['nama_kategori']) ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="status_link" class="form-label">Status</label>
+                                            <select class="form-select" id="status_link" name="status">
+                                                <option value="draft">Draft</option>
+                                                <option value="published" selected>Published</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                    <button type="submit" class="btn btn-primary-custom" name="tambah_berita_url">
-                        <i class="fas fa-link"></i> Tambah Berita
-                    </button>
+                    <button type="button" id="submitManual" class="btn btn-primary">Simpan Berita Manual</button>
+                    <button type="button" id="submitLink" class="btn btn-primary" style="display: none;">Simpan Berita dari Link</button>
                 </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-    <!-- Modal Edit Berita -->
-    <?php if ($edit_berita): ?>
-        <div class="modal fade" id="editBeritaModal" tabindex="-1" aria-labelledby="editBeritaModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <form method="POST" enctype="multipart/form-data">
-                        <input type="hidden" name="id" value="<?php echo $edit_berita['id']; ?>">
-                        <input type="hidden" name="gambar_lama" value="<?php echo $edit_berita['gambar_path']; ?>">
-                        <div class="modal-header">
-                            <h5 class="modal-title" id="editBeritaModalLabel">Edit Berita</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="mb-3">
-                                <label for="edit_judul" class="form-label">Judul Berita</label>
-                                <input type="text" class="form-control" id="edit_judul" name="judul" value="<?php echo $edit_berita['judul']; ?>" required>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label for="edit_kategori_id" class="form-label">Kategori</label>
-                                    <select class="form-select" id="edit_kategori_id" name="kategori_id" required>
-                                        <?php foreach ($kategori as $kat): ?>
-                                            <option value="<?php echo $kat['id']; ?>" <?php echo $kat['id'] == $edit_berita['kategori_id'] ? 'selected' : ''; ?>>
-                                                <?php echo $kat['nama_kategori']; ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label for="edit_penulis" class="form-label">Penulis</label>
-                                    <input type="text" class="form-control" id="edit_penulis" name="penulis" value="<?php echo $edit_berita['penulis'] ?: 'Admin'; ?>">
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label for="edit_tanggal_publish" class="form-label">Tanggal Publikasi</label>
-                                    <input type="date" class="form-control" id="edit_tanggal_publish" name="tanggal_publish" value="<?php echo $edit_berita['tanggal_publish']; ?>" required>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label for="edit_status" class="form-label">Status</label>
-                                    <select class="form-select" id="edit_status" name="status" required>
-                                        <option value="published" <?php echo $edit_berita['status'] == 'published' ? 'selected' : ''; ?>>Published</option>
-                                        <option value="draft" <?php echo $edit_berita['status'] == 'draft' ? 'selected' : ''; ?>>Draft</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <label for="edit_sumber" class="form-label">Sumber Berita (Opsional)</label>
-                                <input type="text" class="form-control" id="edit_sumber" name="sumber" value="<?php echo $edit_berita['sumber']; ?>" placeholder="Contoh: https://example.com/berita">
-                                <small class="text-muted">Isi dengan URL jika berita dari sumber eksternal</small>
-                            </div>
-                            <div class="mb-3">
-                                <label for="edit_gambar" class="form-label">Gambar Utama</label>
-                                <?php if ($edit_berita['gambar_path']): ?>
-                                    <div class="mb-2">
-                                        <img src="<?php echo $edit_berita['gambar_path']; ?>" class="img-thumbnail preview-image" id="edit_preview_gambar">
-                                    </div>
-                                <?php endif; ?>
-                                <input type="file" class="form-control" id="edit_gambar" name="gambar" accept="image/*">
-                                <small class="text-muted">Biarkan kosong jika tidak ingin mengubah gambar</small>
-                            </div>
-                            <div class="mb-3">
-                                <label for="edit_isi" class="form-label">Isi Berita</label>
-                                <textarea class="form-control" id="edit_isi" name="isi" rows="8" required><?php echo $edit_berita['isi']; ?></textarea>
-                            </div>
-                            <div class="card mb-3">
-                                <div class="card-header bg-light">
-                                    <i class="fas fa-search"></i> Pengaturan SEO
-                                </div>
-                                <div class="card-body">
-                                    <div class="mb-3">
-                                        <label for="edit_meta_title" class="form-label">Meta Title</label>
-                                        <input type="text" class="form-control" id="edit_meta_title" name="meta_title" value="<?php echo $edit_berita['meta_title']; ?>" maxlength="60">
-                                        <small class="text-muted">Maksimal 60 karakter</small>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label for="edit_meta_description" class="form-label">Meta Description</label>
-                                        <textarea class="form-control" id="edit_meta_description" name="meta_description" rows="3" maxlength="160"><?php echo $edit_berita['meta_description']; ?></textarea>
-                                        <small class="text-muted">Maksimal 160 karakter</small>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label for="edit_meta_keywords" class="form-label">Meta Keywords</label>
-                                        <input type="text" class="form-control" id="edit_meta_keywords" name="meta_keywords" value="<?php echo $edit_berita['meta_keywords']; ?>">
-                                        <small class="text-muted">Pisahkan dengan koma (contoh: berita, desa, winduaji)</small>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                            <button type="submit" class="btn btn-primary-custom" name="edit_berita">Simpan Perubahan</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-    <?php endif; ?>
-
-    <!-- Modal Impor Berita -->
-    <div class="modal fade" id="importNewsModal" tabindex="-1" aria-labelledby="importNewsModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <form method="POST">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="importNewsModalLabel">Impor Berita dari Google News</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <label for="news_query" class="form-label">Kata Kunci Pencarian</label>
-                            <input type="text" class="form-control" id="news_query" name="news_query" required placeholder="Contoh: berita desa, kabupaten pekalongan">
-                            <small class="text-muted">Masukkan kata kunci untuk mencari berita terkait</small>
-                        </div>
-                        <div class="mb-3">
-                            <label for="import_kategori_id" class="form-label">Kategori Berita</label>
-                            <select class="form-select" id="import_kategori_id" name="import_kategori_id" required>
-                                <option value="">Pilih Kategori</option>
-                                <?php foreach ($kategori as $kat): ?>
-                                    <option value="<?php echo $kat['id']; ?>"><?php echo $kat['nama_kategori']; ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="alert alert-info">
-                            <i class="fas fa-info-circle"></i> Sistem akan mengimpor berita dari Google News berdasarkan kata kunci yang dimasukkan.
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                        <button type="submit" class="btn btn-import" name="import_news">
-                            <i class="fas fa-cloud-download-alt"></i> Impor Berita
-                        </button>
-                    </div>
-                </form>
             </div>
         </div>
     </div>
@@ -1110,82 +986,88 @@ function upload_image($file, $folder) {
     <!-- JavaScript Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.bootstrap5.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.print.min.js"></script>
-    <script src="https://cdn.ckeditor.com/4.16.2/standard/ckeditor.js"></script>
 
+    <!-- Main JavaScript -->
     <script>
-        // Inisialisasi DataTable
+        // Toggle Sidebar
+        $('.toggle-btn').click(function() {
+            $('.sidebar').toggleClass('collapsed');
+            $('.main-content').toggleClass('expanded');
+        });
+
+        // Submenu Toggle
+        $('.has-submenu').click(function(e) {
+            e.preventDefault();
+            $(this).find('.menu-arrow').toggleClass('fa-chevron-down fa-chevron-up');
+            $(this).siblings('.submenu').toggleClass('show');
+        });
+
+        // Auto close alert after 5 seconds
         $(document).ready(function() {
-            $('#beritaTable').DataTable({
-                language: {
-                    url: 'https://cdn.datatables.net/plug-ins/1.13.6/i18n/id.json'
-                },
-                dom: 'Bfrtip',
-                buttons: [
-                    {
-                        extend: 'excel',
-                        text: '<i class="fas fa-file-excel"></i> Excel',
-                        className: 'btn btn-success btn-sm'
-                    },
-                    {
-                        extend: 'pdf',
-                        text: '<i class="fas fa-file-pdf"></i> PDF',
-                        className: 'btn btn-danger btn-sm'
-                    },
-                    {
-                        extend: 'print',
-                        text: '<i class="fas fa-print"></i> Print',
-                        className: 'btn btn-info btn-sm'
-                    }
-                ],
-                responsive: true
-            });
-
-            // Inisialisasi CKEditor
-            CKEDITOR.replace('isi');
-            CKEDITOR.replace('edit_isi');
-
-            // Preview gambar saat edit
-            $('#edit_gambar').change(function(e) {
-                const file = e.target.files[0];
+            setTimeout(function() {
+                $('.alert').alert('close');
+            }, 5000);
+            
+            // Image preview
+            $('#gambar').change(function() {
+                const file = this.files[0];
                 if (file) {
                     const reader = new FileReader();
                     reader.onload = function(e) {
-                        $('#edit_preview_gambar').attr('src', e.target.result);
+                        $('#imagePreview').attr('src', e.target.result).show();
                     }
                     reader.readAsDataURL(file);
-                }
-            });
-
-            // Toggle sidebar
-            $('.toggle-btn').click(function() {
-                $('.sidebar').toggleClass('collapsed');
-                $('.main-content').toggleClass('expanded');
-            });
-
-            // Toggle show/hide source info
-            $('#showSourceToggle').change(function() {
-                if ($(this).is(':checked')) {
-                    $('.source-info').show();
                 } else {
-                    $('.source-info').hide();
+                    $('#imagePreview').hide();
                 }
             });
-
-            // Auto show edit modal if edit parameter exists
-            <?php if ($edit_berita): ?>
-                $(window).on('load', function() {
-                    $('#editBeritaModal').modal('show');
-                });
-            <?php endif; ?>
+            
+            // Embed link preview
+            $('#embed_link').on('input', function() {
+                const link = $(this).val();
+                if (link) {
+                    $('#embedPreview').html('<div class="text-center py-3"><i class="fas fa-spinner fa-spin fa-2x"></i><p>Memproses link...</p></div>').show();
+                    
+                    // Simulasi preview (di implementasi nyata bisa menggunakan API)
+                    setTimeout(function() {
+                        if (link.includes('instagram.com')) {
+                            $('#embedPreview').html('<div class="text-center"><i class="fab fa-instagram fa-3x text-danger"></i><p class="mt-2">Postingan Instagram</p></div>');
+                        } 
+                        else if (link.includes('youtube.com') || link.includes('youtu.be')) {
+                            $('#embedPreview').html('<div class="text-center"><i class="fab fa-youtube fa-3x text-danger"></i><p class="mt-2">Video YouTube</p></div>');
+                        } 
+                        else if (link.includes('twitter.com')) {
+                            $('#embedPreview').html('<div class="text-center"><i class="fab fa-twitter fa-3x text-primary"></i><p class="mt-2">Tweet Twitter</p></div>');
+                        } 
+                        else {
+                            $('#embedPreview').html('<div class="text-center"><i class="fas fa-link fa-3x"></i><p class="mt-2">Link Eksternal</p></div>');
+                        }
+                    }, 800);
+                } else {
+                    $('#embedPreview').hide();
+                }
+            });
+            
+            // Handle tab switch
+            $('button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
+                if (e.target.id === 'manual-tab') {
+                    $('#submitManual').show();
+                    $('#submitLink').hide();
+                } else if (e.target.id === 'link-tab') {
+                    $('#submitManual').hide();
+                    $('#submitLink').show();
+                }
+            });
+            
+            // Form submission
+            $('#submitManual').click(function() {
+                $('#formManual').submit();
+            });
+            
+            $('#submitLink').click(function() {
+                $('#formLink').submit();
+            });
         });
     </script>
 </body>
-
 </html>
