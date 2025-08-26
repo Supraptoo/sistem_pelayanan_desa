@@ -1,94 +1,129 @@
 <?php
-session_start();
-require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../config/functions.php';
+require_once '../config/database.php';
+require_once '../config/functions.php';
 
-// Pastikan koneksi database berhasil
-if (!isset($pdo)) {
-    die("Koneksi database gagal. Silakan periksa konfigurasi database.");
-}
+// Koneksi database
+$db = new database();
+$conn = $db->getConnection();
 
-// Data desa
-$desa_nama = "Desa Winduaji";
-$desa_lokasi = "Kecamatan Paninggaran, Kabupaten Pekalongan, Provinsi Jawa Tengah";
-$desa_motto = "Bersama Membangun Desa yang Mandiri dan Berbudaya";
-
-// Inisialisasi variabel berita
-$berita = [];
+// Inisialisasi variabel
+$berita_data = [];
+$berita_populer = [];
+$kategori_berita = [];
+$current_page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+$limit = 6; // Jumlah berita per halaman
+$offset = ($current_page - 1) * $limit;
 $total_berita = 0;
 $total_pages = 1;
 
+// Ambil data kategori berita
 try {
-    // Mengambil data berita dari database
-    $search = isset($_GET['search']) ? trim($_GET['search']) : '';
-    $sort = isset($_GET['sort']) ? $_GET['sort'] : 'terbaru';
-    $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-    $per_page = 6; // Jumlah berita per halaman
-
-    // Query untuk mendapatkan total berita (untuk pagination)
-    $count_query = "SELECT COUNT(*) as total FROM berita WHERE status = 'published'";
-    if (!empty($search)) {
-        $count_query .= " AND (judul LIKE :search OR isi LIKE :search)";
-    }
-
-    $stmt = $pdo->prepare($count_query);
-    if (!empty($search)) {
-        $searchParam = "%$search%";
-        $stmt->bindParam(':search', $searchParam);
-    }
+    $query = "SELECT * FROM berita_kategori ORDER BY nama_kategori";
+    $stmt = $conn->prepare($query);
     $stmt->execute();
-    $total_berita = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
-    $total_pages = ceil($total_berita / $per_page);
-
-    // Validasi halaman
-    if ($page < 1) $page = 1;
-    if ($page > $total_pages) $page = $total_pages;
-
-    $offset = ($page - 1) * $per_page;
-
-    // Query untuk mendapatkan berita dengan fitur pencarian dan pengurutan
-    $query = "SELECT * FROM berita WHERE status = 'published'";
-    if (!empty($search)) {
-        $query .= " AND (judul LIKE :search OR isi LIKE :search)";
-    }
-    if ($sort == 'terbaru') {
-        $query .= " ORDER BY tanggal_publish  DESC";
-    } else {
-        $query .= " ORDER BY tanggal_publish  ASC";
-    }
-    $query .= " LIMIT :offset, :per_page";
-
-    $stmt = $pdo->prepare($query);
-    if (!empty($search)) {
-        $searchParam = "%$search%";
-        $stmt->bindParam(':search', $searchParam);
-    }
-    $stmt->bindParam(':offset', $offset, PDO::PARAM_INT);
-    $stmt->bindParam(':per_page', $per_page, PDO::PARAM_INT);
-    $stmt->execute();
-    $berita = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    // Tangani error database dengan lebih elegan
-    die("Terjadi kesalahan database: " . $e->getMessage());
+    $kategori_berita = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Exception $e) {
-    die("Terjadi kesalahan: " . $e->getMessage());
+    $error = "Gagal memuat kategori berita: " . $e->getMessage();
 }
 
-// Fungsi untuk mendapatkan path gambar yang benar
-function getImagePath($gambar) {
-    // Jika gambar kosong, gunakan gambar default
-    if (empty($gambar)) {
-        return '../assets/images/landingpage/bgutama.jpg';
+// Filter berdasarkan kategori jika ada
+$kategori_filter = isset($_GET['kategori']) ? $_GET['kategori'] : '';
+
+// Query untuk mengambil total berita
+$query_total = "SELECT COUNT(*) as total FROM berita WHERE status = 'published'";
+$params = [];
+
+if (!empty($kategori_filter)) {
+    $query_total .= " AND kategori_id = :kategori_id";
+    $params[':kategori_id'] = $kategori_filter;
+}
+
+try {
+    $stmt = $conn->prepare($query_total);
+    $stmt->execute($params);
+    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    $total_berita = $result['total'];
+    $total_pages = ceil($total_berita / $limit);
+} catch (Exception $e) {
+    $error = "Gagal memuat total berita: " . $e->getMessage();
+}
+
+// Query untuk mengambil berita
+$query_berita = "SELECT b.*, bk.nama_kategori 
+                 FROM berita b 
+                 LEFT JOIN berita_kategori bk ON b.kategori_id = bk.id 
+                 WHERE b.status = 'published'";
+$params_berita = [];
+
+if (!empty($kategori_filter)) {
+    $query_berita .= " AND b.kategori_id = :kategori_id";
+    $params_berita[':kategori_id'] = $kategori_filter;
+}
+
+$query_berita .= " ORDER BY b.tanggal_publish DESC LIMIT :limit OFFSET :offset";
+
+try {
+    $stmt = $conn->prepare($query_berita);
+
+    // Bind parameters
+    foreach ($params_berita as $key => $value) {
+        $stmt->bindValue($key, $value);
     }
-    
-    // Cek apakah gambar ada di folder uploads
-    $uploadPath = '../uploads/berita/' . $gambar;
-    if (file_exists($uploadPath)) {
-        return $uploadPath;
-    }
-    
-    // Jika tidak ditemukan, gunakan gambar default
-    return '../assets/images/landingpage/bgutama.jpg';
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+
+    $stmt->execute();
+    $berita_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    $error = "Gagal memuat data berita: " . $e->getMessage();
+}
+
+// Ambil berita populer (berdasarkan views)
+try {
+    $query = "SELECT b.*, bk.nama_kategori 
+              FROM berita b 
+              LEFT JOIN berita_kategori bk ON b.kategori_id = bk.id 
+              WHERE b.status = 'published' 
+              ORDER BY b.views DESC 
+              LIMIT 4";
+    $stmt = $conn->prepare($query);
+    $stmt->execute();
+    $berita_populer = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    $error = "Gagal memuat berita populer: " . $e->getMessage();
+}
+
+// Fungsi untuk memotong teks
+// function excerpt($text, $limit = 150) {
+//     if (strlen($text) > $limit) {
+//         $text = substr($text, 0, $limit) . '...';
+//     }
+//     return $text;
+// }
+
+// Fungsi untuk format tanggal Indonesia
+function formatTanggalIndonesia($date)
+{
+    $bulan = array(
+        1 => 'Januari',
+        'Februari',
+        'Maret',
+        'April',
+        'Mei',
+        'Juni',
+        'Juli',
+        'Agustus',
+        'September',
+        'Oktober',
+        'November',
+        'Desember'
+    );
+
+    $tanggal = date('j', strtotime($date));
+    $bulan_num = date('n', strtotime($date));
+    $tahun = date('Y', strtotime($date));
+
+    return $tanggal . ' ' . $bulan[$bulan_num] . ' ' . $tahun;
 }
 ?>
 
@@ -98,731 +133,380 @@ function getImagePath($gambar) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Berita - <?php echo $desa_nama; ?></title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+    <title>Berita Desa Winduaji - Kecamatan Paninggaran, Kabupaten Pekalongan</title>
+      <link rel="shortcut icon" href="../assets/images/logo.png" type="image/x-icon">
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --primary-red: #DC2626;
-            --dark-red: #B91C1C;
-            --light-red: #FEE2E2;
-            --pure-white: #FFFFFF;
-            --off-white: #F9FAFB;
-            --light-gray: #F3F4F6;
-            --medium-gray: #6B7280;
-            --dark-gray: #1F2937;
-            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
-            --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
-            --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
-        }
-
         body {
-            font-family: 'Open Sans', sans-serif;
-            color: var(--dark-gray);
-            background-color: var(--off-white);
-            line-height: 1.8;
-            scroll-behavior: smooth;
-            overflow-x: hidden;
-        }
-
-        h1,
-        h2,
-        h3,
-        h4,
-        h5,
-        h6 {
             font-family: 'Poppins', sans-serif;
-            font-weight: 700;
+            background-color: #f8fafc;
         }
 
-        /* Navbar Modern */
-        .navbar {
-            background: rgba(255, 255, 255, 0.98);
-            padding: 1rem 0;
-            box-shadow: var(--shadow-sm);
-            transition: all 0.4s ease;
-            border-bottom: 1px solid var(--light-gray);
-        }
-
-        .navbar.scrolled {
-            padding: 0.6rem 0;
-            background: rgba(255, 255, 255, 0.98);
-            backdrop-filter: blur(5px);
-        }
-
-        .navbar-brand img {
-            height: 50px;
-            transition: all 0.4s ease;
-        }
-
-        .navbar.scrolled .navbar-brand img {
-            height: 40px;
-        }
-
-        .nav-link {
-            color: var(--dark-gray) !important;
-            font-weight: 600;
-            padding: 0.5rem 1.2rem;
-            margin: 0 0.2rem;
-            border-radius: 30px;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-
-        .nav-link::before {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 0;
-            height: 3px;
-            background: var(--primary-red);
-            transition: width 0.3s ease;
-        }
-
-        .nav-link:hover::before,
-        .nav-link.active::before {
-            width: 70%;
-        }
-
-        .nav-link:hover,
-        .nav-link.active {
-            color: var(--primary-red) !important;
-        }
-
-        /* Hero Section */
         .hero-section {
-            background: linear-gradient(rgba(220, 38, 38, 0.85), rgba(185, 28, 28, 0.85)),
-                url('../assets/images/landingpage/bgutama.jpg') center/cover no-repeat;
-            color: var(--pure-white);
-            padding: 120px 0 80px;
-            position: relative;
-            overflow: hidden;
-            clip-path: polygon(0 0, 100% 0, 100% 90%, 0 100%);
-        }
-
-        .hero-section::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 100px;
-            background: var(--off-white);
-            clip-path: polygon(0 80%, 100% 0, 100% 100%, 0 100%);
-            z-index: 1;
-        }
-
-        .hero-content {
-            position: relative;
-            z-index: 2;
-            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-        }
-
-        .hero-content h1 {
-            font-size: 2.8rem;
-            font-weight: 800;
-            line-height: 1.2;
-            margin-bottom: 1.5rem;
-            animation: fadeInDown 1s both;
-        }
-
-        /* Button Styles */
-        .btn-primary-custom {
-            background: linear-gradient(135deg, var(--primary-red), var(--dark-red));
-            color: var(--pure-white);
-            border: none;
-            padding: 12px 32px;
-            border-radius: 50px;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            transition: all 0.4s ease;
-            box-shadow: var(--shadow-sm);
-            position: relative;
-            overflow: hidden;
-            z-index: 1;
-        }
-
-        .btn-primary-custom:hover {
-            transform: translateY(-3px);
-            box-shadow: var(--shadow-lg);
-            color: var(--pure-white);
-            background: linear-gradient(135deg, var(--dark-red), var(--primary-red));
-        }
-
-        /* Section Title */
-        .section-title {
-            position: relative;
-            display: inline-block;
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: var(--primary-red);
-            margin-bottom: 1.5rem;
-            padding-bottom: 0.8rem;
-        }
-
-        .section-title::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 80px;
-            height: 4px;
-            background: linear-gradient(to right, var(--primary-red), var(--dark-red));
-            border-radius: 2px;
-        }
-
-        .section-subtitle {
-            color: var(--medium-gray);
-            font-size: 1.1rem;
-            margin-bottom: 2rem;
-        }
-
-        /* Search and Sort Section */
-        .search-sort-section {
-            background: var(--pure-white);
-            padding: 2rem;
-            border-radius: 10px;
-            box-shadow: var(--shadow-sm);
-            margin-bottom: 2rem;
-        }
-
-        /* Berita Card */
-        .news-card {
-            background: var(--pure-white);
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: var(--shadow-sm);
-            transition: all 0.4s ease;
-            height: 100%;
-            margin-bottom: 1.5rem;
-        }
-
-        .news-card:hover {
-            transform: translateY(-6px);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .news-card .card-img-top {
-            height: 220px;
-            object-fit: cover;
-            width: 100%;
-        }
-
-        .news-card .card-body {
-            padding: 1.5rem;
-        }
-
-        .news-date {
-            color: var(--primary-red);
-            font-weight: 500;
-            font-size: 0.9rem;
-        }
-
-        .news-title {
-            font-size: 1.3rem;
-            margin-bottom: 1rem;
-            transition: color 0.3s ease;
-        }
-
-        .news-card:hover .news-title {
-            color: var(--primary-red);
-        }
-
-        .news-excerpt {
-            color: var(--medium-gray);
-            margin-bottom: 1.5rem;
-        }
-
-        .read-more {
-            color: var(--primary-red);
-            font-weight: 600;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            transition: all 0.3s ease;
-        }
-
-        .read-more:hover {
-            color: var(--dark-red);
-            transform: translateX(5px);
-        }
-
-        .read-more i {
-            margin-left: 5px;
-            transition: all 0.3s ease;
-        }
-
-        .read-more:hover i {
-            transform: translateX(3px);
-        }
-
-        /* Pagination */
-        .pagination .page-item .page-link {
-            color: var(--primary-red);
-            border: 1px solid var(--light-gray);
-            margin: 0 5px;
-            border-radius: 5px;
-            transition: all 0.3s ease;
-        }
-
-        .pagination .page-item.active .page-link {
-            background: var(--primary-red);
-            border-color: var(--primary-red);
+            background: linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), url('../assets/images/landingpage/bg.png');
+            background-size: cover;
+            background-position: center;
             color: white;
         }
 
-        .pagination .page-item .page-link:hover {
-            background: var(--light-red);
-            border-color: var(--light-red);
+        .news-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
 
-        /* Footer */
-        .footer {
-            background: linear-gradient(135deg, var(--dark-red), var(--primary-red));
-            color: var(--pure-white);
-            padding: 4rem 0 2rem;
-            position: relative;
-            clip-path: polygon(0 5%, 100% 0, 100% 100%, 0 100%);
+        .news-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
         }
 
-        .footer::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: url('../assets/images/pattern.png') center/cover;
-            opacity: 0.05;
-            z-index: 1;
-        }
-
-        .footer-content {
-            position: relative;
-            z-index: 2;
-        }
-
-        .footer-logo {
-            height: 50px;
-            margin-bottom: 1rem;
-            transition: all 0.4s ease;
-        }
-
-        .footer-links h5 {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 1.2rem;
-            position: relative;
-            display: inline-block;
-        }
-
-        .footer-links h5::after {
-            content: '';
-            position: absolute;
-            bottom: -6px;
-            left: 0;
-            width: 40px;
-            height: 2px;
-            background: var(--pure-white);
-        }
-
-        .footer-links ul {
-            list-style: none;
-            padding: 0;
-        }
-
-        .footer-links li {
-            margin-bottom: 0.6rem;
-        }
-
-        .footer-links a {
-            color: rgba(255, 255, 255, 0.8);
-            text-decoration: none;
+        .category-btn {
             transition: all 0.3s ease;
         }
 
-        .footer-links a:hover {
-            color: var(--pure-white);
-            padding-left: 5px;
+        .category-btn.active,
+        .category-btn:hover {
+            background-color: #dc2626;
+            color: white;
         }
 
-        .social-icons a {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 36px;
-            height: 36px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 50%;
-            color: var(--pure-white);
-            margin-right: 0.6rem;
+        .pagination-btn {
             transition: all 0.3s ease;
         }
 
-        .social-icons a:hover {
-            background: var(--pure-white);
-            color: var(--primary-red);
-            transform: translateY(-3px);
-        }
-
-        .footer-bottom {
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            padding-top: 1.5rem;
-            margin-top: 2rem;
-        }
-
-        /* Back to Top Button */
-        .back-to-top {
-            position: fixed;
-            bottom: 25px;
-            right: 25px;
-            width: 45px;
-            height: 45px;
-            background: var(--primary-red);
-            color: var(--pure-white);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: var(--shadow-md);
-            transition: all 0.4s ease;
-            z-index: 99;
-            border: 2px solid var(--pure-white);
-        }
-
-        .back-to-top:hover {
-            background: var(--dark-red);
-            transform: translateY(-3px);
-        }
-
-        /* Animations */
-        @keyframes fadeInDown {
-            from {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-            }
-
-            to {
-                opacity: 1;
-            }
-        }
-
-        /* Responsive Design */
-        @media (max-width: 991.98px) {
-            .hero-content h1 {
-                font-size: 2.4rem;
-            }
-
-            .section-title {
-                font-size: 2rem;
-            }
-        }
-
-        @media (max-width: 767.98px) {
-            .hero-section {
-                padding: 100px 0 60px;
-            }
-
-            .hero-content h1 {
-                font-size: 2rem;
-            }
-
-            .section-title {
-                font-size: 1.8rem;
-            }
-        }
-
-        @media (max-width: 575.98px) {
-            .hero-content h1 {
-                font-size: 1.8rem;
-            }
-
-            .section-title {
-                font-size: 1.6rem;
-            }
+        .pagination-btn.active,
+        .pagination-btn:hover {
+            background-color: #dc2626;
+            color: white;
         }
     </style>
 </head>
 
-<body data-bs-spy="scroll" data-bs-target=".navbar" data-bs-offset="100">
-     <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-light fixed-top">
-        <div class="container">
-            <a class="navbar-brand" href="../landingpage.php">
-                <img src="../assets/images/logo.png" alt="Logo <?php echo $desa_nama; ?>" class="img-fluid">
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="../landingpage.php">Beranda</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="index.php#sejarah">Sejarah</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="index.php#demografi">Demografi</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link active" href="#umkm">UMKM</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="../pages/galeri.php">Galeri</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="../pages/berita.php">Berita</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="../login.php">Login</a>
-                    </li>
-                </ul>
+<body>
+    <!-- Header/Navbar -->
+     <header class="bg-white shadow-md sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center">
+                <img src="../assets/images/logo.png" alt="Logo Desa Winduaji" class="w-12 h-12 mr-3">
+                <span class="text-xl font-bold text-red-600">Desa Winduaji</span>
             </div>
+            
+           <nav class="hidden md:flex space-x-8">
+                <a href="../landingpage.php" class="text-gray-700 hover:text-red-600">Beranda</a>
+                 <a href="../pages/sejarah.php" class="text-gray-700 hover:text-red-600">Profil Desa</a>
+                <a href="../pages/berita.php" class="text-gray-700 font-semibold">Berita</a>
+                <a href="../pages/umkm.php" class="text-gray-700 hover:text-red-600">UMKM</a>
+                <a href="../pages/galeri.php" class="text-gray-700 hover:text-red-600">Galeri</a>
+                <a href="../login.php" class="text-gray-700 hover:text-red-600">admin</a>
+            </nav>
+            
+            <button class="md:hidden text-gray-700">
+                <i class="fas fa-bars text-xl"></i>
+            </button>
         </div>
-    </nav>
+    </header>
+
 
     <!-- Hero Section -->
-    <section class="hero-section">
-        <div class="container hero-content text-center">
-            <div class="row justify-content-center">
-                <div class="col-lg-10">
-                    <h1 class="display-4 fw-bold mb-4 animate__animated animate__fadeInDown">Berita Desa</h1>
-                    <p class="lead mb-5 animate__animated animate__fadeIn animate__delay-1s">Informasi terkini seputar kegiatan dan perkembangan <?php echo $desa_nama; ?></p>
-                </div>
+    <section class="hero-section py-20">
+        <div class="container mx-auto px-4 text-center">
+            <h1 class="text-4xl md:text-5xl font-bold mb-4">Berita Desa Winduaji</h1>
+            <p class="text-xl mb-8">Informasi Terkini Seputar Kegiatan dan Perkembangan Desa Winduaji</p>
+            <a href="#berita" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-6 rounded-lg inline-flex items-center">
+                <span>Baca Berita</span>
+                <i class="fas fa-arrow-down ml-2"></i>
+            </a>
+        </div>
+    </section>
+
+    <!-- Kategori Section -->
+    <section class="py-12 bg-white">
+        <div class="container mx-auto px-4">
+            <h2 class="text-3xl font-bold text-center mb-12">Kategori Berita</h2>
+            <div class="flex flex-wrap justify-center gap-4 mb-12">
+                <a href="?kategori=" class="category-btn px-6 py-2 rounded-full border <?php echo empty($kategori_filter) ? 'border-red-600 text-red-600 active bg-red-600 text-white' : 'border-gray-300 text-gray-700'; ?> font-medium">Semua</a>
+                <?php foreach ($kategori_berita as $kategori): ?>
+                    <a href="?kategori=<?php echo $kategori['id']; ?>" class="category-btn px-6 py-2 rounded-full border <?php echo $kategori_filter == $kategori['id'] ? 'border-red-600 text-red-600 active bg-red-600 text-white' : 'border-gray-300 text-gray-700'; ?> font-medium">
+                        <?php echo htmlspecialchars($kategori['nama_kategori']); ?>
+                    </a>
+                <?php endforeach; ?>
             </div>
         </div>
     </section>
 
     <!-- Berita Section -->
-    <section class="py-5 bg-light">
-        <div class="container">
-            <div class="row justify-content-center">
-                <div class="col-lg-10">
-                    <!-- Search and Sort Section -->
-                    <div class="search-sort-section mb-5" data-aos="fade-up">
-                        <form action="berita.php" method="get" class="row g-3">
-                            <div class="col-md-8">
-                                <div class="input-group">
-                                    <input type="text" class="form-control" name="search" placeholder="Cari berita..." value="<?php echo htmlspecialchars($search); ?>">
-                                    <button class="btn btn-primary-custom" type="submit">
-                                        <i class="fas fa-search"></i> Cari
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="input-group">
-                                    <label class="input-group-text" for="sort">Urutkan</label>
-                                    <select class="form-select" name="sort" id="sort" onchange="this.form.submit()">
-                                        <option value="terbaru" <?php echo $sort == 'terbaru' ? 'selected' : ''; ?>>Terbaru</option>
-                                        <option value="terlama" <?php echo $sort == 'terlama' ? 'selected' : ''; ?>>Terlama</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </form>
-                    </div>
+    <section id="berita" class="py-16 bg-gray-50">
+        <div class="container mx-auto px-4">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Berita Utama -->
+                <div class="lg:col-span-2">
+                    <h2 class="text-3xl font-bold mb-8">Berita Terbaru</h2>
 
-                    <!-- Results Info -->
-                    <?php if (!empty($search)): ?>
-                        <div class="alert alert-info mb-4" data-aos="fade-up">
-                            Menampilkan hasil pencarian untuk: <strong>"<?php echo htmlspecialchars($search); ?>"</strong>
-                            <a href="berita.php" class="float-end text-danger">Tampilkan semua berita</a>
+                    <?php if (empty($berita_data)): ?>
+                        <div class="bg-white rounded-xl p-8 text-center">
+                            <i class="fas fa-newspaper text-4xl text-gray-400 mb-4"></i>
+                            <p class="text-gray-600">Belum ada berita yang tersedia.</p>
                         </div>
-                    <?php endif; ?>
+                    <?php else: ?>
+                        <!-- Berita utama (yang pertama) -->
+                        <?php $berita_utama = $berita_data[0]; ?>
+                        <div class="news-card bg-white rounded-xl overflow-hidden shadow-md mb-8">
+                            <div class="h-64 md:h-80 overflow-hidden">
+                                <?php if (!empty($berita_utama['gambar_path'])): ?>
+                                    <img src="../<?php echo $berita_utama['gambar_path']; ?>" alt="<?php echo htmlspecialchars($berita_utama['judul']); ?>" class="w-full h-full object-cover">
+                                <?php else: ?>
+                                    <div class="w-full h-full bg-gray-200 flex items-center justify-center">
+                                        <i class="fas fa-newspaper text-4xl text-gray-400"></i>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                            <div class="p-6">
+                                <div class="flex items-center mb-4">
+                                    <span class="bg-red-100 text-red-600 text-sm font-semibold px-3 py-1 rounded-full mr-3">
+                                        <?php echo htmlspecialchars($berita_utama['nama_kategori']); ?>
+                                    </span>
+                                    <span class="text-gray-500 text-sm">
+                                        <i class="far fa-calendar-alt mr-1"></i>
+                                        <?php echo formatTanggalIndonesia($berita_utama['tanggal_publish']); ?>
+                                    </span>
+                                </div>
+                                <h3 class="text-2xl font-bold mb-3"><?php echo htmlspecialchars($berita_utama['judul']); ?></h3>
 
-                    <!-- Berita List -->
-                    <?php if (count($berita) > 0): ?>
-                        <div class="row">
-                            <?php foreach ($berita as $item): ?>
-                                <div class="col-md-6 col-lg-4" data-aos="fade-up">
-                                    <div class="news-card card h-100 border-0 shadow-sm">
-                                        <img src="<?php echo getImagePath($item['gambar_path']); ?>" class="card-img-top" alt="<?php echo htmlspecialchars($item['judul']); ?>">
-                                        <div class="card-body">
-                                            <span class="news-date d-block mb-2">
-                                                <i class="far fa-calendar-alt me-2"></i>
-                                                <?php
-                                                // Remove space from array key and add null check
-                                                $publishDate = isset($item['tanggal_publish']) ? $item['tanggal_publish'] : date('Y-m-d');
-                                                echo date('d F Y', strtotime($publishDate));
-                                                ?>
+                                <a href="detail-berita.php?id=<?php echo $berita_utama['id']; ?>" class="text-red-600 font-semibold inline-flex items-center">
+                                    <span>Baca Selengkapnya</span>
+                                    <i class="fas fa-arrow-right ml-2"></i>
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Dua berita berikutnya -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <?php for ($i = 1; $i < min(3, count($berita_data)); $i++): ?>
+                                <?php $berita = $berita_data[$i]; ?>
+                                <div class="news-card bg-white rounded-xl overflow-hidden shadow-md">
+                                    <div class="h-48 overflow-hidden">
+                                        <?php if (!empty($berita['gambar_path'])): ?>
+                                            <img src="../<?php echo $berita['gambar_path']; ?>" alt="<?php echo htmlspecialchars($berita['judul']); ?>" class="w-full h-full object-cover">
+                                        <?php else: ?>
+                                            <div class="w-full h-full bg-gray-200 flex items-center justify-center">
+                                                <i class="fas fa-newspaper text-3xl text-gray-400"></i>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div class="p-5">
+                                        <div class="flex items-center mb-3">
+                                            <span class="bg-red-100 text-red-600 text-xs font-semibold px-2 py-1 rounded-full mr-2">
+                                                <?php echo htmlspecialchars($berita['nama_kategori']); ?>
                                             </span>
-                                            <h5 class="news-title"><?php echo htmlspecialchars($item['judul']); ?></h5>
-                                            <p class="news-excerpt"><?php echo excerpt($item['isi'], 100); ?></p>
-                                            <a href="detail_berita.php?id=<?php echo $item['id']; ?>" class="read-more">
-                                                Baca selengkapnya <i class="fas fa-arrow-right"></i>
-                                            </a>
+                                            <span class="text-gray-500 text-xs">
+                                                <i class="far fa-calendar-alt mr-1"></i>
+                                                <?php echo formatTanggalIndonesia($berita['tanggal_publish']); ?>
+                                            </span>
                                         </div>
+                                        <h3 class="text-lg font-bold mb-2"><?php echo htmlspecialchars($berita['judul']); ?></h3>
+                                        <p class="text-gray-600 text-sm mb-3"><?php echo excerpt(strip_tags($berita['isi']), 100); ?></p>
+                                        <a href="detail-berita.php?id=<?php echo $berita['id']; ?>" class="text-red-600 text-sm font-semibold inline-flex items-center">
+                                            <span>Baca Selengkapnya</span>
+                                            <i class="fas fa-arrow-right ml-1 text-xs"></i>
+                                        </a>
                                     </div>
                                 </div>
-                            <?php endforeach; ?>
-                        </div>
-
-                        <!-- Pagination -->
-                        <?php if ($total_pages > 1): ?>
-                            <nav aria-label="Page navigation" class="mt-5" data-aos="fade-up">
-                                <ul class="pagination justify-content-center">
-                                    <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                                        <a class="page-link" href="?page=<?php echo $page - 1; ?>&search=<?php echo urlencode($search); ?>&sort=<?php echo $sort; ?>" tabindex="-1" aria-disabled="true">Sebelumnya</a>
-                                    </li>
-
-                                    <?php
-                                    // Tampilkan maksimal 5 nomor halaman
-                                    $start_page = max(1, min($page - 2, $total_pages - 4));
-                                    $end_page = min($total_pages, $start_page + 4);
-
-                                    for ($i = $start_page; $i <= $end_page; $i++): ?>
-                                        <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                                            <a class="page-link" href="?page=<?php echo $i; ?>&search=<?php echo urlencode($search); ?>&sort=<?php echo $sort; ?>"><?php echo $i; ?></a>
-                                        </li>
-                                    <?php endfor; ?>
-
-                                    <li class="page-item <?php echo $page >= $total_pages ? 'disabled' : ''; ?>">
-                                        <a class="page-link" href="?page=<?php echo $page + 1; ?>&search=<?php echo urlencode($search); ?>&sort=<?php echo $sort; ?>">Selanjutnya</a>
-                                    </li>
-                                </ul>
-                            </nav>
-                        <?php endif; ?>
-                    <?php else: ?>
-                        <div class="text-center py-5" data-aos="fade-up">
-                            <img src="../assets/images/landingpage/bgutama.jpg" alt="No data" class="img-fluid mb-4" style="max-width: 300px;">
-                            <h4 class="mb-3">Berita tidak ditemukan</h4>
-                            <p class="text-muted mb-4">Tidak ada berita yang sesuai dengan pencarian Anda</p>
-                            <a href="berita.php" class="btn btn-primary-custom px-4">Lihat Semua Berita</a>
+                            <?php endfor; ?>
                         </div>
                     <?php endif; ?>
                 </div>
+
+                <!-- Sidebar -->
+                <div class="lg:col-span-1">
+                    <h2 class="text-2xl font-bold mb-6">Berita Populer</h2>
+
+                    <div class="bg-white rounded-xl shadow-md p-5 mb-6">
+                        <?php if (empty($berita_populer)): ?>
+                            <p class="text-gray-600 text-center py-4">Belum ada berita populer.</p>
+                        <?php else: ?>
+                            <?php foreach ($berita_populer as $index => $berita): ?>
+                                <div class="flex items-start mb-4 <?php echo $index < count($berita_populer) - 1 ? 'pb-4 border-b border-gray-100' : ''; ?>">
+                                    <div class="w-16 h-16 overflow-hidden rounded-md mr-4 flex-shrink-0">
+                                        <?php if (!empty($berita['gambar_path'])): ?>
+                                            <img src="../<?php echo $berita['gambar_path']; ?>" alt="<?php echo htmlspecialchars($berita['judul']); ?>" class="w-full h-full object-cover">
+                                        <?php else: ?>
+                                            <div class="w-full h-full bg-gray-200 flex items-center justify-center">
+                                                <i class="fas fa-newspaper text-gray-400"></i>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div>
+                                        <h3 class="font-semibold mb-1"><?php echo htmlspecialchars($berita['judul']); ?></h3>
+                                        <p class="text-gray-500 text-sm">
+                                            <i class="far fa-calendar-alt mr-1"></i>
+                                            <?php echo formatTanggalIndonesia($berita['tanggal_publish']); ?>
+                                        </p>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+
+
+                </div>
+
+                <!-- Daftar Berita Lainnya -->
+                <?php if (count($berita_data) > 3): ?>
+                    <h2 class="text-3xl font-bold mt-16 mb-8">Berita Lainnya</h2>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+                        <?php for ($i = 3; $i < count($berita_data); $i++): ?>
+                            <?php $berita = $berita_data[$i]; ?>
+                            <div class="news-card bg-white rounded-xl overflow-hidden shadow-md">
+                                <div class="h-48 overflow-hidden">
+                                    <?php if (!empty($berita['gambar_path'])): ?>
+                                        <img src="../<?php echo $berita['gambar_path']; ?>" alt="<?php echo htmlspecialchars($berita['judul']); ?>" class="w-full h-full object-cover">
+                                    <?php else: ?>
+                                        <div class="w-full h-full bg-gray-200 flex items-center justify-center">
+                                            <i class="fas fa-newspaper text-3xl text-gray-400"></i>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="p-5">
+                                    <div class="flex items-center mb-3">
+                                        <span class="bg-red-100 text-red-600 text-xs font-semibold px-2 py-1 rounded-full mr-2">
+                                            <?php echo htmlspecialchars($berita['nama_kategori']); ?>
+                                        </span>
+                                        <span class="text-gray-500 text-xs">
+                                            <i class="far fa-calendar-alt mr-1"></i>
+                                            <?php echo formatTanggalIndonesia($berita['tanggal_publish']); ?>
+                                        </span>
+                                    </div>
+                                    <h3 class="text-lg font-bold mb-2"><?php echo htmlspecialchars($berita['judul']); ?></h3>
+
+                                    <a href="detail-berita.php?id=<?php echo $berita['id']; ?>" class="text-red-600 text-sm font-semibold inline-flex items-center">
+                                        <span>Baca Selengkapnya</span>
+                                        <i class="fas fa-arrow-right ml-1 text-xs"></i>
+                                    </a>
+                                </div>
+                            </div>
+                        <?php endfor; ?>
+                    </div>
+                <?php endif; ?>
+
+                <!-- Pagination -->
+                <?php if ($total_pages > 1): ?>
+                    <div class="flex justify-center mt-8">
+                        <div class="flex space-x-2">
+                            <?php if ($current_page > 1): ?>
+                                <a href="?page=<?php echo $current_page - 1; ?><?php echo !empty($kategori_filter) ? '&kategori=' . $kategori_filter : ''; ?>" class="pagination-btn w-10 h-10 rounded-full border border-gray-300 text-gray-700 font-semibold flex items-center justify-center">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                            <?php endif; ?>
+
+                            <?php for ($i = 1; $i <= $total_pages; $i++): ?>
+                                <a href="?page=<?php echo $i; ?><?php echo !empty($kategori_filter) ? '&kategori=' . $kategori_filter : ''; ?>" class="pagination-btn w-10 h-10 rounded-full border <?php echo $i == $current_page ? 'bg-red-600 text-white' : 'border-gray-300 text-gray-700'; ?> font-semibold flex items-center justify-center">
+                                    <?php echo $i; ?>
+                                </a>
+                            <?php endfor; ?>
+
+                            <?php if ($current_page < $total_pages): ?>
+                                <a href="?page=<?php echo $current_page + 1; ?><?php echo !empty($kategori_filter) ? '&kategori=' . $kategori_filter : ''; ?>" class="pagination-btn w-10 h-10 rounded-full border border-gray-300 text-gray-700 font-semibold flex items-center justify-center">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endif; ?>
             </div>
+    </section>
+
+    <!-- Newsletter Section -->
+    <section class="py-16 bg-red-600 text-white">
+        <div class="container mx-auto px-4 text-center">
+            <h2 class="text-3xl font-bold mb-4">Berlangganan Newsletter</h2>
+            <p class="text-xl mb-8 max-w-2xl mx-auto">Dapatkan update berita terbaru dari Desa Winduaji langsung ke email Anda.</p>
+            <form method="POST" action="subscribe.php" class="max-w-md mx-auto flex flex-col sm:flex-row gap-4">
+                <input type="email" name="email" placeholder="Alamat Email Anda" required class="flex-grow px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-300 text-gray-900">
+                <button type="submit" class="bg-white text-red-600 px-6 py-3 rounded-lg font-semibold">Berlangganan</button>
+            </form>
         </div>
     </section>
 
     <!-- Footer -->
-    <footer class="footer">
-        <div class="container footer-content">
-            <div class="row g-4">
-                <div class="col-lg-3">
-                    <div class="mb-4">
-                        <img src="../assets/images/logo.png" alt="Logo <?php echo $desa_nama; ?>" class="footer-logo">
-                    </div>
-                    <p class="mb-4"><?php echo $desa_motto; ?></p>
-                    <div class="social-icons">
-                        <a href="#" class="me-2"><i class="fab fa-facebook-f"></i></a>
-                        <a href="#" class="me-2"><i class="fab fa-instagram"></i></a>
-                        <a href="#" class="me-2"><i class="fab fa-youtube"></i></a>
-                        <a href="#" class="me-2"><i class="fab fa-whatsapp"></i></a>
-                    </div>
+    <footer class="bg-gray-800 text-white py-12">
+        <div class="container mx-auto px-4">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div>
+                    <h3 class="text-xl font-bold mb-4">Desa Winduaji</h3>
+                    <p class="text-gray-400">Kecamatan Paninggaran, Kabupaten Pekalongan, Provinsi Jawa Tengah</p>
                 </div>
-                <div class="col-lg-2 col-md-4">
-                    <div class="footer-links">
-                        <h5>Menu</h5>
-                        <ul>
-                            <li><a href="../landingpage.php">Beranda</a></li>
-                            <li><a href="../landingpage.php#sejarah">Sejarah</a></li>
-                            <li><a href="../landingpage.php#demografi">Demografi</a></li>
-                            <li><a href="../landingpage.php#umkm">UMKM</a></li>
-                            <li><a href="galeri.php">Galeri</a></li>
-                            <li><a href="berita.php">Berita</a></li>
-                        </ul>
-                    </div>
+
+                <div>
+                    <h3 class="text-xl font-bold mb-4">Tautan Cepat</h3>
+                    <ul class="space-y-2">
+                        <li><a href="../landingpage.php" class="text-gray-400 hover:text-white">Beranda</a></li>
+                        <li><a href="berita.php" class="text-gray-400 hover:text-white">Berita</a></li>
+                        <li><a href="umkm.php" class="text-gray-400 hover:text-white">UMKM</a></li>
+                        <li><a href="galeri.php" class="text-gray-400 hover:text-white">Galeri</a></li>
+                    </ul>
                 </div>
-                <div class="col-lg-2 col-md-4">
-                    <div class="footer-links">
-                        <h5>Layanan</h5>
-                        <ul>
-                            <li><a href="#">Administrasi</a></li>
-                            <li><a href="#">Kesehatan</a></li>
-                            <li><a href="#">Pendidikan</a></li>
-                            <li><a href="#">Pelaporan</a></li>
-                            <li><a href="#">Pengaduan</a></li>
-                        </ul>
-                    </div>
+
+                <div>
+                    <h3 class="text-xl font-bold mb-4">Kontak Kami</h3>
+                    <ul class="space-y-2">
+                        <li class="flex items-center">
+                            <i class="fas fa-phone-alt mr-3 text-gray-400"></i>
+                            <span class="text-gray-400">(021) 1234-5678</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fas fa-envelope mr-3 text-gray-400"></i>
+                            <span class="text-gray-400">info@desawinduaji.id</span>
+                        </li>
+                        <li class="flex items-center">
+                            <i class="fab fa-whatsapp mr-3 text-gray-400"></i>
+                            <span class="text-gray-400">+62 812 3456 7890</span>
+                        </li>
+                    </ul>
                 </div>
-                <div class="col-lg-5 col-md-4">
-                    <div class="footer-links">
-                        <h5>Kontak & Lokasi</h5>
-                        <ul>
-                            <li>
-                                <i class="fas fa-map-marker-alt me-2"></i>
-                                <?php echo $desa_lokasi; ?>
-                            </li>
-                            <li>
-                                <i class="fas fa-phone-alt me-2"></i>
-                                (021) 1234-5678
-                            </li>
-                            <li>
-                                <i class="fas fa-envelope me-2"></i>
-                                info@<?php echo strtolower(str_replace(' ', '', $desa_nama)); ?>.id
-                            </li>
-                        </ul>
-                        <div class="map-container mt-3">
-                            <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3953.123456789012!2d109.5597842!3d-7.1641082!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x2e6fe2bac929ba3d%3A0x5027a76e35648c0!2sWinduaji%2C%20Kec.%20Paninggaran%2C%20Kabupaten%20Pekalongan%2C%20Jawa%20Tengah!5e0!3m2!1sen!2sid!4v1710000000000!5m2!1sen!2sid" style="border:0;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
-                        </div>
+
+                <div>
+                    <h3 class="text-xl font-bold mb-4">Ikuti Kami</h3>
+                    <div class="flex space-x-4">
+                        <a href="#" class="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-red-600">
+                            <i class="fab fa-facebook-f"></i>
+                        </a>
+                        <a href="#" class="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-red-600">
+                            <i class="fab fa-instagram"></i>
+                        </a>
+                        <a href="#" class="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-red-600">
+                            <i class="fab fa-youtube"></i>
+                        </a>
+                        <a href="#" class="w-10 h-10 bg-gray-700 rounded-full flex items-center justify-center hover:bg-red-600">
+                            <i class="fab fa-whatsapp"></i>
+                        </a>
                     </div>
                 </div>
             </div>
-            <div class="footer-bottom text-center pt-4">
-                <p class="mb-0">&copy; <?php echo date('Y'); ?> <?php echo $desa_nama; ?>. Seluruh hak cipta dilindungi.</p>
+
+            <div class="border-t border-gray-700 mt-8 pt-8 text-center text-gray-400">
+                <p>&copy; 2023 Desa Winduaji. All rights reserved.</p>
             </div>
         </div>
     </footer>
 
-    <!-- Back to Top Button -->
-    <a href="#" class="back-to-top animate__animated animate__fadeIn"><i class="fas fa-arrow-up"></i></a>
-
-    <!-- JavaScript Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
-
-    <!-- Main JavaScript -->
     <script>
-        // Initialize AOS animation
-        AOS.init({
-            duration: 800,
-            easing: 'ease-in-out',
-            once: true
-        });
+        // JavaScript untuk interaksi berita
+        document.addEventListener('DOMContentLoaded', function() {
+            const categoryButtons = document.querySelectorAll('.category-btn');
 
-        // Navbar scroll effect
-        $(window).scroll(function() {
-            if ($(this).scrollTop() > 100) {
-                $('.navbar').addClass('scrolled');
-            } else {
-                $('.navbar').removeClass('scrolled');
-            }
-        });
+            // Filter kategori
+            categoryButtons.forEach(button => {
+                button.addEventListener('click', function(e) {
+                    // Remove active class from all buttons
+                    categoryButtons.forEach(btn => btn.classList.remove('active', 'bg-red-600', 'text-white'));
+                    categoryButtons.forEach(btn => btn.classList.add('border-gray-300', 'text-gray-700'));
 
-        // Back to top button
-        $(window).scroll(function() {
-            if ($(this).scrollTop() > 300) {
-                $('.back-to-top').fadeIn('slow');
-            } else {
-                $('.back-to-top').fadeOut('slow');
-            }
-        });
-
-        $('.back-to-top').click(function(e) {
-            e.preventDefault();
-            $('html, body').animate({
-                scrollTop: 0
-            }, '300');
+                    // Add active class to clicked button
+                    this.classList.remove('border-gray-300', 'text-gray-700');
+                    this.classList.add('active', 'bg-red-600', 'text-white');
+                });
+            });
         });
     </script>
 </body>

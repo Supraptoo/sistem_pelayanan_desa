@@ -1,7 +1,7 @@
 <?php
 
 /**
- * functions.php - Helper functions for Pelayanan Desa Kedungwuni
+ * functions.php - Helper functions for Desa Winduaji
  * 
  * Updated with enhanced security, better error handling, and additional utilities
  */
@@ -25,8 +25,8 @@ function is_logged_in(): bool
 function redirect_if_logged_in(): void
 {
     if (is_logged_in()) {
-        $role = $_SESSION['user']['role'] ?? 'warga';
-        $redirect = ($role === 'admin') ? 'admin/dashboard.php' : 'dashboard.php';
+        $role = $_SESSION['user']['role'] ?? 'admin';
+        $redirect = ($role === 'superadmin' || $role === 'admin') ? 'admin/dashboard.php' : 'dashboard.php';
         header("Location: $redirect");
         exit();
     }
@@ -57,7 +57,7 @@ function require_role($roles, string $redirect = 'unauthorized.php'): void
 {
     require_login();
 
-    $user_role = $_SESSION['user']['role'] ?? 'warga';
+    $user_role = $_SESSION['user']['role'] ?? 'admin';
 
     if (is_array($roles)) {
         if (!in_array($user_role, $roles)) {
@@ -78,6 +78,10 @@ function require_role($roles, string $redirect = 'unauthorized.php'): void
  * @return string Teks yang sudah dipotong
  */
 function excerpt($text, $limit = 100) {
+    if (!is_string($text)) {
+        return '';
+    }
+    
     $text = strip_tags($text); // Hilangkan tag HTML jika ada
     if (mb_strlen($text, 'UTF-8') > $limit) {
         $text = mb_substr($text, 0, $limit, 'UTF-8');
@@ -119,13 +123,13 @@ function is_authorized($required_roles): bool
         return false;
     }
 
-    $user_role = $_SESSION['user']['role'] ?? 'warga';
+    $user_role = $_SESSION['user']['role'] ?? 'admin';
 
     // Define role hierarchy
     $hierarchy = [
-        'admin' => ['admin', 'petugas', 'warga'],
-        'petugas' => ['petugas', 'warga'],
-        'warga' => ['warga']
+        'superadmin' => ['superadmin', 'admin', 'editor'],
+        'admin' => ['admin', 'editor'],
+        'editor' => ['editor']
     ];
 
     if (is_array($required_roles)) {
@@ -152,6 +156,8 @@ function is_authorized($required_roles): bool
 function get_status_badge(string $status): string
 {
     $classes = [
+        'published' => 'bg-green-100 text-green-800',
+        'draft' => 'bg-gray-100 text-gray-800',
         'selesai' => 'bg-green-100 text-green-800',
         'diproses' => 'bg-yellow-100 text-yellow-800',
         'menunggu' => 'bg-blue-100 text-blue-800',
@@ -172,6 +178,8 @@ function get_status_icon(string $status, string $icon_set = 'fa'): string
 {
     $icons = [
         'fa' => [
+            'published' => 'fa-check-circle',
+            'draft' => 'fa-pencil-alt',
             'selesai' => 'fa-check-circle',
             'diproses' => 'fa-spinner fa-pulse',
             'menunggu' => 'fa-clock',
@@ -179,6 +187,8 @@ function get_status_icon(string $status, string $icon_set = 'fa'): string
             'default' => 'fa-question-circle'
         ],
         'bi' => [
+            'published' => 'bi-check-circle-fill',
+            'draft' => 'bi-pencil',
             'selesai' => 'bi-check-circle-fill',
             'diproses' => 'bi-arrow-repeat',
             'menunggu' => 'bi-clock',
@@ -238,20 +248,17 @@ function format_tanggal_indonesia(string $date, bool $include_time = false): str
 }
 
 /**
- * Get document type label
- * @param string $type Document type from database
+ * Get UMKM category label
+ * @param string $type Category from database
  * @return string Human-readable label
  */
-function get_document_label(string $type): string
+function get_umkm_category_label(string $type): string
 {
     $labels = [
-        'KTP' => 'Kartu Tanda Penduduk',
-        'KK' => 'Kartu Keluarga',
-        'Surat Domisili' => 'Surat Keterangan Domisili',
-        'Akte Kelahiran' => 'Akta Kelahiran',
-        'Surat Kematian' => 'Surat Keterangan Kematian',
-        'SKTM' => 'Surat Keterangan Tidak Mampu',
-        'SKU' => 'Surat Keterangan Usaha'
+        'Kerupuk Paninggaran' => 'Kerupuk Paninggaran',
+        'Teh Biyung' => 'Teh Biyung',
+        'Oga Jahe' => 'Oga Jahe',
+        'Opak' => 'Opak'
     ];
 
     return $labels[$type] ?? $type;
@@ -268,6 +275,10 @@ function get_document_label(string $type): string
  */
 function set_flash_message(string $type, string $message): void
 {
+    if (!isset($_SESSION['flash_messages'])) {
+        $_SESSION['flash_messages'] = [];
+    }
+    
     $_SESSION['flash_messages'][] = [
         'type' => $type,
         'message' => $message,
@@ -387,7 +398,7 @@ function get_pagination_params(int $default_per_page = 10): array
 function get_user_fullname(PDO $pdo, int $user_id): ?string
 {
     try {
-        $stmt = $pdo->prepare("SELECT nama_lengkap FROM users WHERE id = ?");
+        $stmt = $pdo->prepare("SELECT nama_lengkap FROM admin WHERE id = ?");
         $stmt->execute([$user_id]);
         return $stmt->fetchColumn();
     } catch (PDOException $e) {
@@ -397,18 +408,50 @@ function get_user_fullname(PDO $pdo, int $user_id): ?string
 }
 
 /**
- * Get all document types from database
+ * Get all news categories from database
  * @param PDO $pdo Database connection
- * @return array List of document types
+ * @return array List of news categories
  */
-function get_document_types(PDO $pdo): array
+function get_news_categories(PDO $pdo): array
 {
     try {
-        $stmt = $pdo->query("SELECT DISTINCT jenis_dokumen FROM dokumen");
-        return $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $stmt = $pdo->query("SELECT id, nama_kategori FROM berita_kategori ORDER BY nama_kategori");
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         error_log("Database error: " . $e->getMessage());
-        return ['KTP', 'KK', 'Surat Domisili', 'Akte Kelahiran', 'Surat Kematian'];
+        return [];
+    }
+}
+
+/**
+ * Get all gallery categories from database
+ * @param PDO $pdo Database connection
+ * @return array List of gallery categories
+ */
+function get_gallery_categories(PDO $pdo): array
+{
+    try {
+        $stmt = $pdo->query("SELECT id, nama_kategori FROM galeri_kategori ORDER BY nama_kategori");
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Database error: " . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * Get all UMKM categories from database
+ * @param PDO $pdo Database connection
+ * @return array List of UMKM categories
+ */
+function get_umkm_categories(PDO $pdo): array
+{
+    try {
+        $stmt = $pdo->query("SELECT id, nama_kategori, icon FROM umkm_kategori ORDER BY nama_kategori");
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Database error: " . $e->getMessage());
+        return [];
     }
 }
 
@@ -425,6 +468,11 @@ function get_document_types(PDO $pdo): array
  */
 function validate_uploaded_file(array $file, array $allowed_types, int $max_size = 2097152): array
 {
+    // Check if file was uploaded
+    if (!isset($file['error']) || $file['error'] === UPLOAD_ERR_NO_FILE) {
+        return [false, 'Tidak ada file yang diunggah'];
+    }
+    
     // Check for upload errors
     if ($file['error'] !== UPLOAD_ERR_OK) {
         $errors = [
@@ -494,6 +542,71 @@ function get_current_url(array $new_params = []): string
 }
 
 /**
+ * Create slug from text
+ * @param string $text Text to convert to slug
+ * @return string Generated slug
+ */
+if (!function_exists('createSlug')) {
+    function createSlug($text) {
+        if (!is_string($text) || empty($text)) {
+            return 'n-a';
+        }
+        
+        // Replace non-letter or non-digit characters with -
+        $text = preg_replace('~[^\pL\d]+~u', '-', $text);
+        
+        // Transliterate - handle potential null values
+        $transliterated = @iconv('utf-8', 'us-ascii//TRANSLIT', $text);
+        if ($transliterated === false || $transliterated === null) {
+            // If iconv fails, use a simpler approach
+            $text = preg_replace('~[^-\w]+~', '', $text);
+        } else {
+            $text = $transliterated;
+            // Remove unwanted characters
+            $text = preg_replace('~[^-\w]+~', '', $text);
+        }
+        
+        // Trim
+        $text = trim($text, '-');
+        
+        // Remove duplicate -
+        $text = preg_replace('~-+~', '-', $text);
+        
+        // Convert to lowercase
+        $text = strtolower($text);
+        
+        if (empty($text)) {
+            return 'n-a';
+        }
+        return $text;
+    }
+}
+
+/**
+ * Alternative slug creation function without iconv dependency
+ * @param string $text Text to convert to slug
+ * @return string Generated slug
+ */
+function create_slug_simple($text) {
+    if (!is_string($text) || empty($text)) {
+        return 'n-a';
+    }
+    
+    // Replace non-alphanumeric characters with -
+    $text = preg_replace('/[^a-zA-Z0-9\s]/', '', $text);
+    $text = preg_replace('/\s+/', '-', $text);
+    
+    // Convert to lowercase and trim
+    $text = strtolower(trim($text, '-'));
+    
+    if (empty($text)) {
+        return 'n-a';
+    }
+    
+    return $text;
+}
+
+/**
  * Debugging Functions
  */
 
@@ -513,29 +626,4 @@ function debug($var, bool $return = false): ?string
 
     echo $output;
     return null;
-}
-function createSlug($text) {
-    // Replace non-letter or non-digit characters with -
-    $text = preg_replace('~[^\pL\d]+~u', '-', $text);
-    
-    // Transliterate
-    $text = iconv('utf-8', 'us-ascii//TRANSLIT', $text);
-    
-    // Remove unwanted characters
-    $text = preg_replace('~[^-\w]+~', '', $text);
-    
-    // Trim
-    $text = trim($text, '-');
-    
-    // Remove duplicate -
-    $text = preg_replace('~-+~', '-', $text);
-    
-    // Convert to lowercase
-    $text = strtolower($text);
-    
-    if (empty($text)) {
-        return 'n-a';
-    }
-    
-    return $text;
 }

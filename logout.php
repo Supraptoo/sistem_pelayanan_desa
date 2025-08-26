@@ -6,6 +6,7 @@ session_destroy();
 <html>
 <head>
     <title>Logout</title>
+    <link rel="shortcut icon" href="./assets/images/logo.png" type="image/x-icon">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </head>
 <body>
